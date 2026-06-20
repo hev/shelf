@@ -22,7 +22,7 @@ decision alongside the results. `shelf` renders that decision as a badge.
 |---|---|---|---|
 | `Sanderson` | 1 | **hybrid_text** | Short and keyword-shaped — BM25 + fuzzy over the text field, no vector needed. |
 | `branden sandersn` | 2 | **hybrid_text** | Same route; the fuzzy legs ([RFC 0057](https://github.com/hev/layer/blob/main/docs/rfcs/0057-hybrid-text-fuzzy-surfacing.md)) still find Brandon Sanderson through the typos. |
-| `the name of the wind` | 4 | **fused** | Mid-length — exact-title BM25 *and* semantic, merged by Turbopuffer-native RRF. |
+| `the name of the wind` | 4 | **fused** | Mid-length — exact-title BM25 *and* semantic, merged by RRF. |
 | `sprawling epic fantasy with morally grey characters and political intrigue` | 10 | **semantic** | Long and natural-language — ANN over description embeddings. |
 
 The v1 routing policy keys purely on token count: `≤2 → hybrid_text`,
@@ -35,7 +35,7 @@ on each route so the badge visibly changes.
 the gateway; the app only composes them:
 
 - **Hybrid text fusion** ([RFC 0022](https://github.com/hev/layer/blob/main/docs/rfcs/archive/0022-hybrid-text-fusion.md)) —
-  the `HybridText` expansion: per-token fuzzy legs + a BM25 leg → upstream RRF.
+  the `HybridText` expansion: per-token fuzzy legs + a BM25 leg → RRF.
 - **Query router** (RFC 0044, phase 1) — the `Auto` expression and its
   routing decision block.
 - **Fuzzy surfacing** (RFC 0057) — typo'd queries still return rows.
@@ -139,14 +139,13 @@ That gap is **field-aware routing**: the design question this corpus raises,
 the way SciFact raised the fuzzy-leg ranking question that RFC 0057
 resolved. `shelf` observes it; it does not solve it.
 
-The fused route raises a second one. A `fused` row carries only the aggregate
-RRF `$score`, so nothing in the response says which leg found it: keyword (BM25 +
-fuzzy) or semantic (ANN). `shelf` reconstructs that client-side by re-issuing the
-same input with the route forced to `hybrid_text` and `semantic` and matching ids
-back — the per-row **kw**/**sem** rank pills on any fused result. That is enough
-to spot a keyword-only rider, but the finer grain (BM25 vs each fuzzy token, in
-one round trip, over a shared consistency cut) needs the gateway. Written up to
-revive RFC 0021's per-row `$fused.legs`:
+The fused route raises a second one. A `fused` row's aggregate RRF `$score`
+doesn't tell you which leg found it: BM25, one of the fuzzy-token legs, or
+semantic ANN. `shelf` opts in to Layer's `$fused.legs` response shape with
+`include_leg_breakdown: true`, so each result can show the exact per-leg ranks
+from the same fused request. That is enough to spot a semantic carry, a
+keyword-only rider, or a row that both sides agreed on. The original finding
+that drove the gateway work is preserved in
 [docs/fused-leg-attribution.md](docs/fused-leg-attribution.md).
 
 ## Declarative config

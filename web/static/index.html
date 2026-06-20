@@ -107,12 +107,12 @@
   .route-badge.fused{color:var(--fused);border-color:var(--fused)}
   .route-badge.semantic{color:var(--semantic);border-color:var(--semantic)}
 
-  /* ---------- per-row leg attribution (fused only) ---------- */
+  /* ---------- per-row leg attribution ---------- */
   .legs-strip{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
   .leg{font-family:var(--mono);font-size:.625rem;font-weight:700;letter-spacing:.03em;
     border-radius:2px;padding:1px 7px;border:1px solid;white-space:nowrap}
-  .leg.kw{color:var(--hybrid);border-color:var(--hybrid)}
-  .leg.sem{color:var(--semantic);border-color:var(--semantic)}
+  .leg.bm25,.leg.fuzzy{color:var(--hybrid);border-color:var(--hybrid)}
+  .leg.semantic{color:var(--semantic);border-color:var(--semantic)}
   .leg.off{color:var(--muted);border-color:var(--rule)}
 
   /* ---------- right rail (inspector + facets) ---------- */
@@ -254,23 +254,30 @@
 
   const ROUTE_DESC = {
     hybrid_text: 'Short, keyword-shaped input — a <b>BM25</b> leg + one <b>fuzzy</b> leg per token, fused by RRF. No vector used.',
-    fused: 'Mid-length input — keyword <b>and</b> semantic legs, merged upstream by <b>reciprocal rank fusion</b>.',
+    fused: 'Mid-length input — keyword <b>and</b> semantic legs, merged by <b>reciprocal rank fusion</b>.',
     semantic: 'Long, natural-language input — <b>ANN</b> over the query embedding (bge-small).',
   };
 
-  const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   const commas = n => (n == null ? '' : Number(n).toLocaleString('en-US'));
 
-  // Per-row leg pills: which side (keyword = hybrid_text, semantic = ANN) found
-  // this row, and at what rank. Present only on fused results (see /api/search).
-  function legStrip(legs) {
-    if (!legs) return '';
-    const pill = (cls, label, name, rank) => '<span class="leg ' + cls + (rank == null ? ' off' : '') +
-      '" title="' + name + (rank == null ? ' leg did not return this row' : ' leg ranked it #' + rank) + '">' +
-      label + ' ' + (rank == null ? '·' : '#' + rank) + '</span>';
-    return '<div class="legs-strip">' +
-      pill('kw', 'kw', 'keyword (hybrid_text)', legs.keyword) +
-      pill('sem', 'sem', 'semantic (ANN)', legs.semantic) + '</div>';
+  // Per-row leg pills are the gateway's opt-in $fused.legs: BM25, fuzzy-token,
+  // and semantic ranks from the same fused request.
+  function legStrip(fused) {
+    const legs = fused && Array.isArray(fused.legs) ? fused.legs : [];
+    if (!legs.length) return '';
+    const name = leg => String(leg.leg || '');
+    const cls = leg => name(leg) === 'semantic' ? 'semantic' : (name(leg) === 'bm25' ? 'bm25' : 'fuzzy');
+    const short = leg => name(leg) === 'semantic' ? 'sem' : (name(leg).startsWith('fuzzy:') ? 'fz:' + name(leg).slice(6) : name(leg));
+    const title = leg => {
+      const score = leg.score == null ? '' : ' · score ' + Number(leg.score).toFixed(4);
+      return name(leg) + (leg.rank == null ? ' did not return this row' : ' ranked it #' + leg.rank + score);
+    };
+    return '<div class="legs-strip">' + legs.map(leg =>
+      '<span class="leg ' + cls(leg.leg) + (leg.rank == null ? ' off' : '') +
+      '" title="' + esc(title(leg)) + '">' + esc(short(leg.leg)) + ' ' +
+      (leg.rank == null ? '·' : '#' + leg.rank) + '</span>'
+    ).join('') + '</div>';
   }
 
   function highlight(text, tokens) {
@@ -364,7 +371,7 @@
         '<p class="snip">' + snip + '</p>' +
         '<div class="row"><span class="tags">' + tags + '</span>' +
         '<span class="score">' + stars + ratings + ' · ' + score + '</span></div>' +
-        legStrip(r.legs) +
+        legStrip(r['$fused']) +
         '</div>';
     });
     results.innerHTML = html;
@@ -391,18 +398,20 @@
     body += '<div class="routeline">' + (ROUTE_DESC[routing.route] || '') + '</div>';
     body += kv('policy', routing.policy) + kv('tokens', routing.tokens) + kv('executed', routing.executed);
     if (h) {
-      const fuzzy = (h.legs || 1) - 1;
+      const semantic = routing.route === 'fused' ? 1 : 0;
+      const fuzzyLegs = Math.max(0, (h.tokens || []).length);
       body += '<div class="cap" style="margin-top:14px">tokens · <a href="https://github.com/turbopuffer/alyze" target="_blank" rel="noopener">alyze tokenizer</a></div>';
       body += '<div>' + (h.tokens || []).map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
-      body += '<div class="legs">' + h.legs + ' legs upstream: <b>1 BM25</b> + <b>' + fuzzy +
-        ' fuzzy</b> (one per token), fused by RRF.</div>';
+      body += '<div class="legs">' + h.legs + ' effective legs: <b>1 BM25</b> + <b>' + fuzzyLegs +
+        ' fuzzy</b> (one per token)' + (semantic ? ' + <b>1 semantic</b>' : '') + ', fused by RRF.</div>';
       body += kv('fuzziness', h.fuzziness) + kv('rank_constant', h.rank_constant) + kv('per_leg_limit', h.per_leg_limit);
     }
     if (attribution) {
       body += '<div class="cap" style="margin-top:14px">per-row legs</div>';
-      body += '<div class="legs">The fused <code>$score</code> is post-RRF only, so to show which side found each row we re-issued the same input forced to <b>hybrid_text</b> and <b>semantic</b> (' +
-        attribution.calls + ' extra calls, depth ' + attribution.depth + ') and matched ids back. ' +
-        '<span style="color:var(--hybrid);font-weight:600">kw</span> ⊕ <span style="color:var(--semantic);font-weight:600">sem</span> ranks compose the order above. Splitting <b>kw</b> into BM25 vs each fuzzy token needs the gateway.</div>';
+      body += '<div class="legs">The gateway returned <code>$fused.legs</code> for ' + attribution.rows +
+        ' rows in this same request: <span style="color:var(--hybrid);font-weight:600">bm25/fuzzy</span>' +
+        (routing.route === 'fused' ? ' ⊕ <span style="color:var(--semantic);font-weight:600">sem</span>' : '') +
+        ' ranks compose the order above. Extra attribution calls: ' + attribution.calls + '.</div>';
     }
     if (tookMs != null) body += '<div class="legs" style="margin-top:10px"><span class="lat">⚡ ' + esc(String(tookMs)) +
       ' ms</span> — routed, executed &amp; returned (edge-measured).</div>';

@@ -1,8 +1,8 @@
 # Finding: per-leg result attribution on fused queries
 
-**Status: finding from `shelf` (the query-routing demo). Candidate to revive as
-an RFC against `hev/layer`. Not scheduled.** Authored docs-first, in the shape of
-a layer RFC, so it can move to `../layer/docs/rfcs/` largely unchanged.
+**Status: shipped in `../layer` and adopted by `shelf`.** This document is the
+finding that drove the gateway work; the live demo now sends
+`include_leg_breakdown: true` and renders the returned `$fused.legs` directly.
 
 ## Summary
 
@@ -10,7 +10,7 @@ A `fused` query returns each row with only the aggregate RRF `$score`. The
 client cannot see which leg matched a given row, or at what per-leg rank: the
 keyword side (the RFC 0022 `hybrid_text` expansion — one BM25 leg plus one fuzzy
 leg per token) and the semantic side (ANN over the query vector) collapse into a
-single fused number. This finding proposes reviving per-row leg provenance —
+single fused number. This finding proposed reviving per-row leg provenance —
 the `$fused.legs` shape RFC 0021 already specced — behind an opt-in flag, so an
 application can show and evaluate *why* a row placed where it did.
 
@@ -50,34 +50,12 @@ keyword side via common tokens, absent from the semantic side, yet fused into th
 top 5. That is ranking evidence the fused `$score` cannot provide — the precise
 case RFC 0022 named.
 
-## What `shelf` does today, and why it is a crutch
+## What `shelf` does now
 
-To ship the view now without a gateway change, both backends
-(`search/app.py:_attribute_legs`, `src/worker.js:attributeLegs`) re-issue the
-same input twice with the route forced — `route: "hybrid_text"` and
-`route: "semantic"`, the override `api/query.mdx` blesses for "A/B comparison of
-strategies on the same input" — then match row ids back to recover per-side
-ranks. It is honest observation, not a second fusion. But it is a demo crutch:
-
-- **Three round trips per fused query** instead of one (one routed, two forced).
-- **Coarse grain only.** It resolves keyword-side vs semantic-side. It cannot
-  split the keyword side into BM25 vs each fuzzy-token leg, because that
-  expansion is gateway-internal — the exact grain most useful for tuning fuzzy.
-- **No shared consistency cut.** The three calls can read different index
-  states; the forced lists are not guaranteed to be the lists the routed query
-  actually fused.
-- **Approximate membership.** A forced re-run reconstructs each side at a chosen
-  depth; it does not observe the gateway's real per-leg `per_leg_limit` cut.
-
-The right home for this is the gateway, where the per-leg ranks already exist at
-fusion time.
-
-## Proposed surface (sketch)
-
-An opt-in request flag (placement an open question — a top-level
-`include_leg_breakdown: true`, or a third `Auto`/`HybridText` option) turns on
-per-row provenance. Each row gains a `$fused.legs` array aligned to the leg order
-the `hybrid` echo already reports, reusing RFC 0021's shape verbatim:
+Both backends send top-level `include_leg_breakdown: true` on the primary
+`Auto` query. No forced `hybrid_text` or `semantic` follow-up calls are needed.
+Each fused row gains a `$fused.legs` array aligned to the effective leg order
+the `hybrid` echo reports:
 
 ```json
 {
@@ -94,7 +72,7 @@ the `hybrid` echo already reports, reusing RFC 0021's shape verbatim:
 ```
 
 `null` means the row fell outside that leg's `per_leg_limit` cut — same semantics
-RFC 0021 defined. Default off, so payload and cost are unchanged for everyone who
+RFC 0021 defined. Default is off, so payload and cost are unchanged for everyone who
 does not ask.
 
 ## Implementation note: sharded already has it
@@ -118,14 +96,12 @@ The cost is asymmetric, and one path is nearly free:
 - **No change to fusion math or routing.** This exposes existing intermediate
   values; it does not reweight or re-rank.
 
-## Open questions
+## Resolution
 
-- **Flag placement and name.** Top-level request field vs an `Auto`/`HybridText`
-  tuple option. `include_leg_breakdown` is a placeholder.
-- **Leg labels.** How to name fuzzy legs (`fuzzy:<token>`?) so the per-token
-  legs are distinguishable, and how that interacts with the 15-token cap.
-- **Unsharded cost.** Is gateway-side leg execution acceptable on the unsharded
-  path when the flag is set, or should it require upstream support first?
+- **Flag placement and name.** Top-level `include_leg_breakdown: true`.
+- **Leg labels.** `bm25`, `fuzzy:<token>`, and `semantic`.
+- **Unsharded cost.** The default path stays unchanged; opt-in attribution lets
+  the gateway run and fuse legs locally so it can return ranks.
 
 ## References
 
@@ -136,5 +112,5 @@ The cost is asymmetric, and one path is nearly free:
 - RFC 0044, what `fused` fuses (the hybrid_text expansion **and** the ANN leg):
   `docs/rfcs/0044-query-router.md:109-110`; the `route` override:
   `site/src/content/docs/api/query.mdx` Options table.
-- `shelf` workaround: `search/app.py:_attribute_legs`,
-  `src/worker.js:attributeLegs`; UI in `web/static/index.html` (`legStrip`).
+- `shelf` adoption: `search/app.py:_run_query`, `src/worker.js:runQuery`; UI in
+  `web/static/index.html` (`legStrip`).

@@ -90,12 +90,13 @@ async function facets(env) {
 // One gateway query with transient-error retry; resolves to rows + echo blocks
 // or throws an Error carrying { status, detail }. The JS twin of app.py's
 // _run_query(). Real 4xx fail immediately; 502/503/504 retry.
-async function runQuery(env, rankBy, topK, genre, include) {
+async function runQuery(env, rankBy, topK, genre, include, includeLegBreakdown = false) {
   const url = `${env.LAYER_GATEWAY_URL.replace(/\/+$/, "")}/v2/namespaces/${env.LAYER_NAMESPACE}/query`;
   const body = JSON.stringify({
     rank_by: rankBy,
     top_k: Math.max(1, Math.min(topK, 50)),
     include_attributes: include,
+    include_leg_breakdown: includeLegBreakdown,
     ...(genre ? { filters: ["genres", "Contains", genre] } : {}),
   });
   const headers = { "Content-Type": "application/json" };
@@ -127,28 +128,6 @@ async function runQuery(env, rankBy, topK, genre, include) {
   throw Object.assign(new Error(lastDetail), { status: 502, detail: `gateway error after retries: ${lastDetail}` });
 }
 
-// Tag each fused row with its keyword-side and semantic-side rank. The JS twin
-// of app.py's _attribute_legs(): a fused response carries only the aggregate
-// RRF $score, so we re-issue the SAME input twice with the route forced (the
-// override the docs bless for "A/B comparison of strategies on the same input")
-// and match ids back — observation, not a second fusion. Keyword side = the
-// shipped hybrid_text expansion (BM25 + fuzzy); semantic side = the ANN leg.
-async function attributeLegs(env, query, vector, genre, base) {
-  // Re-run each side at least as deep as the legs the gateway fused, so any row
-  // that contributed is found in at least one side's list.
-  const depth = Math.max(12, (base.hybrid && base.hybrid.per_leg_limit) || 50);
-  const [keyword, semantic] = await Promise.all([
-    runQuery(env, ["text", "Auto", query, { vector, route: "hybrid_text" }], depth, genre, []),
-    runQuery(env, ["text", "Auto", query, { vector, route: "semantic" }], depth, genre, []),
-  ]);
-  const kwRank = new Map(keyword.rows.map((r, i) => [r.id, i + 1]));
-  const semRank = new Map(semantic.rows.map((r, i) => [r.id, i + 1]));
-  for (const r of base.rows) {
-    r.legs = { keyword: kwRank.get(r.id) ?? null, semantic: semRank.get(r.id) ?? null };
-  }
-  return { depth, keyword_total: keyword.rows.length, semantic_total: semantic.rows.length, calls: 2 };
-}
-
 async function search(request, env) {
   let req;
   try {
@@ -172,23 +151,15 @@ async function search(request, env) {
 
   let base;
   try {
-    base = await runQuery(env, ["text", "Auto", query, { vector }], topK, genre, INCLUDE);
+    base = await runQuery(env, ["text", "Auto", query, { vector }], topK, genre, INCLUDE, true);
   } catch (exc) {
     return new Response(exc.detail || String(exc), { status: exc.status || 502 });
   }
 
-  // Only the fused route mixes a keyword side and a semantic side worth
-  // attributing; hybrid_text and semantic are single-sided. Degrade silently
-  // if attribution fails — the fused list itself still stands.
-  const routing = base.routing || {};
-  let attribution = null;
-  if (routing.route === "fused" && routing.executed !== false) {
-    try {
-      attribution = await attributeLegs(env, query, vector, genre, base);
-    } catch {
-      attribution = null;
-    }
-  }
+  const attributedRows = base.rows.filter((row) => row.$fused && Array.isArray(row.$fused.legs)).length;
+  const attribution = attributedRows
+    ? { source: "gateway", calls: 0, rows: attributedRows, leg_count: base.hybrid ? base.hybrid.legs : null }
+    : null;
 
   return json({
     rows: base.rows,

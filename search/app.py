@@ -87,7 +87,11 @@ async def facets() -> dict:
 
 
 async def _run_query(
-    rank_by: list, top_k: int, genre: str | None, include: list[str] = INCLUDE
+    rank_by: list,
+    top_k: int,
+    genre: str | None,
+    include: list[str] = INCLUDE,
+    include_leg_breakdown: bool = False,
 ) -> dict:
     """One gateway query with transient-error retry; returns rows + echo blocks.
 
@@ -98,6 +102,7 @@ async def _run_query(
         rank_by=rank_by,
         top_k=max(1, min(top_k, 50)),
         include_attributes=include,
+        include_leg_breakdown=include_leg_breakdown,
         filters=["genres", "Contains", genre] if genre else None,
     )
     last_detail = "unknown error"
@@ -121,33 +126,6 @@ async def _run_query(
     raise HTTPException(status_code=502, detail=f"gateway error after retries: {last_detail}")
 
 
-async def _attribute_legs(query: str, vector: list, genre: str | None, base: dict) -> dict:
-    """Tag each fused row with its keyword-side and semantic-side rank.
-
-    A `fused` response carries only the aggregate RRF `$score` — the gateway does
-    not expose which leg matched each row (RFC 0022 cut per-leg provenance). So
-    we re-issue the SAME input twice with the route forced — the override the
-    docs bless for "A/B comparison of strategies on the same input" — and match
-    ids back. This is observation, not a second fusion: the keyword side is the
-    shipped `hybrid_text` expansion (BM25 + fuzzy), the semantic side is the ANN
-    leg. Splitting the keyword side finer (BM25 vs each fuzzy token) needs the
-    gateway — see the leg-attribution finding for ../layer.
-    """
-    # Re-run each side at least as deep as the legs the gateway fused, so any row
-    # that contributed is found in at least one side's list.
-    depth = max(12, (base.get("hybrid") or {}).get("per_leg_limit") or 50)
-    keyword, semantic = await asyncio.gather(
-        _run_query(["text", "Auto", query, {"vector": vector, "route": "hybrid_text"}], depth, genre, include=[]),
-        _run_query(["text", "Auto", query, {"vector": vector, "route": "semantic"}], depth, genre, include=[]),
-    )
-    kw_rank = {r["id"]: i + 1 for i, r in enumerate(keyword["rows"])}
-    sem_rank = {r["id"]: i + 1 for i, r in enumerate(semantic["rows"])}
-    for row in base["rows"]:
-        row["legs"] = {"keyword": kw_rank.get(row["id"]), "semantic": sem_rank.get(row["id"])}
-    return {"depth": depth, "keyword_total": len(keyword["rows"]),
-            "semantic_total": len(semantic["rows"]), "calls": 2}
-
-
 @app.post("/api/search")
 async def search(req: SearchRequest) -> dict:
     query = req.query.strip()
@@ -159,18 +137,27 @@ async def search(req: SearchRequest) -> dict:
     # in one hop instead of deferring. (hybrid_text ignores the vector — the
     # wasted embed on keyword queries is what RFC 0044 phase 2 would remove.)
     vector = embedder.embed_query(query)
-    result = await _run_query(["text", "Auto", query, {"vector": vector}], req.top_k, req.genre)
+    result = await _run_query(
+        ["text", "Auto", query, {"vector": vector}],
+        req.top_k,
+        req.genre,
+        include_leg_breakdown=True,
+    )
 
-    # Only the fused route mixes a keyword side and a semantic side worth
-    # attributing; hybrid_text and semantic are single-sided. Degrade silently
-    # if attribution fails — the fused list itself still stands.
-    routing = result.get("routing") or {}
-    result["attribution"] = None
-    if routing.get("route") == "fused" and routing.get("executed", True):
-        try:
-            result["attribution"] = await _attribute_legs(query, vector, req.genre, result)
-        except (HTTPException, HevlayerError):
-            result["attribution"] = None
+    attributed_rows = sum(
+        1 for row in result["rows"]
+        if isinstance(row.get("$fused"), dict) and isinstance(row["$fused"].get("legs"), list)
+    )
+    result["attribution"] = (
+        {
+            "source": "gateway",
+            "calls": 0,
+            "rows": attributed_rows,
+            "leg_count": (result.get("hybrid") or {}).get("legs"),
+        }
+        if attributed_rows
+        else None
+    )
 
     result["query"] = query
     result["genre"] = req.genre
