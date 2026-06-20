@@ -1,10 +1,12 @@
 {
   "examples": [
-    { "text": "Sanderson", "note": "one keyword token → hybrid_text (BM25 + fuzzy), no vector. Top hit: Brandon Sanderson." },
-    { "text": "brandon sandrson", "typo": true, "note": "misspelled → hybrid_text; the fuzzy legs still surface Brandon Sanderson." },
-    { "text": "wizard school chosen one", "note": "a few words → fused: keyword ⊕ semantic, merged by RRF. Top hit: Harry Potter." },
-    { "text": "the lord of the rings", "note": "a title → fused: BM25 over the words plus semantic neighbours. Tolkien, top to bottom." },
-    { "text": "a lonely robot learning what it means to be human", "note": "long natural language → semantic: ANN over descriptions. Top hit: I, Robot." },
-    { "text": "a sprawling epic fantasy with morally grey characters and political intrigue", "note": "describe the vibe → semantic. Surfaces Words of Radiance." }
+    { "text": "the lord of the rings", "note": "a title, 4 tokens → fused: BM25 over the words ⊕ semantic neighbours, merged by RRF. Tolkien, top to bottom." },
+    { "text": "frodo and the one ring", "note": "describe it, don't title it → fused (5 tokens): keyword leg catches 'ring', semantic leg pulls the Lord of the Rings volumes to the top." },
+    { "text": "a quest to destroy a magic ring", "note": "5 tokens → fused: no title words to match, so the semantic leg carries it, clustering epic-fantasy quests with The Lord of the Rings among them." },
+    { "text": "harry potter chamber of secrets", "note": "5 tokens → fused: BM25 nails the title words, semantic keeps the rest of the series close. Top hit: Harry Potter and the Chamber of Secrets." },
+    { "text": "a child wizard story", "note": "describe the vibe → fused (3 tokens): keyword leg on 'wizard'/'story' ⊕ semantic on the idea. Top hit: a book literally titled Wizard." },
+    { "text": "frodo bagins", "typo": true, "note": "misspelled, 2 tokens → hybrid_text; the fuzzy legs still find Frodo Baggins and the LOTR volumes through the typo." },
+    { "text": "harry poter", "typo": true, "note": "misspelled, 2 tokens → hybrid_text; the fuzzy legs still find the Harry Potter series through the typo." },
+    { "text": "an orphan boy who discovers he is a wizard and attends a school for magic", "note": "a full sentence, 13 tokens → semantic: ANN over descriptions, no title words needed. Returns orphan-wizard stories, Harry Potter among them." }
   ]
 }
