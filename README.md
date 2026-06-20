@@ -1,5 +1,7 @@
 # shelf
 
+**[Live demo → shelf.hevlayer.com](https://shelf.hevlayer.com)**
+
 **Book search that shows its routing.** A micro-app over [hev layer](https://hevlayer.com)
 where the hero isn't the results — it's the badge that tells you *how* the
 gateway searched. Type an author, a title, or a vibe, and watch the same search
