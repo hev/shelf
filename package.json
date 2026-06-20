@@ -1,0 +1,13 @@
+{
+  "name": "shelf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that serves the shelf query-routing UI and proxies search (with Workers AI query embedding) to the Layer gateway.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.101.0"
+  }
+}

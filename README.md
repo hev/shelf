@@ -94,11 +94,20 @@ the query at search time so semantic/fused routes resolve in one hop (see below)
 ## Architecture
 
 ```
-HuggingFace Warehouse (Eitanli/goodreads, pinned)
-  → indexer/   load → embed descriptions → upsert to shelf-books via the layer client
-  → search/    FastAPI: build the Auto rank_by, embed the query, return results + routing + facet counts
-  → web/       minimal UI: search box, route badge, facet rail, result list
+Eitanli/goodreads (HF, pinned 622b9c6)
+  → indexer/        CLI: load → embed (fastembed bge-small) → upsert to shelf-books
+  → search/app.py   FastAPI (dev): embed query → Auto+vector → rows + routing + hybrid + facets
+  → src/worker.js   Cloudflare Worker (prod): same, query embedding via Workers AI bge-small
+  → web/static/     vanilla single-page UI: search, route badge, Routing inspector, genre rail
 ```
+
+Two backends, one UI — the same split as the SciFact demo (`server.py` +
+`src/worker.js`). The FastAPI service is the local-dev/reference path (fastembed,
+identical to the indexer's embeddings); the Cloudflare Worker is the production
+deploy and embeds queries with Workers AI `@cf/baai/bge-small-en-v1.5` — the same
+model, with bge's query-instruction prefix applied so the vectors match the
+index. Both inject the gateway key server-side and return the gateway's
+`routing`/`hybrid` echo blocks; the UI renders them in the Routing inspector.
 
 ### The one-hop embedding note
 
@@ -121,6 +130,18 @@ exact title / semantic description) that token count alone can't disambiguate.
 That gap — **field-aware routing** — is the design question this corpus
 surfaces, the way SciFact surfaced the fuzzy-leg ranking question RFC 0057
 resolved. `shelf` observes it; it does not solve it.
+
+## Run it
+
+```bash
+uv sync --extra search                 # install deps
+cp .env.example .env                   # add LAYER_GATEWAY_API_KEY (the upstream Turbopuffer key)
+uv run python -m indexer               # populate shelf-books (~10k books); --dry-run to preview
+uv run uvicorn search.app:app --reload # serve UI + API at http://127.0.0.1:8000
+```
+
+Production is a Cloudflare Worker (mirrors the SciFact demo): `npm install`, set
+the key with `wrangler secret put LAYER_API_KEY`, then `npm run deploy`.
 
 ## Status
 

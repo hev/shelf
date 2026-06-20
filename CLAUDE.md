@@ -40,23 +40,26 @@ When in doubt about a field name or response shape, read the doc — don't guess
 
 Pinned: [`Eitanli/goodreads`](https://huggingface.co/datasets/Eitanli/goodreads),
 MIT, ~10k popular books. Fields: `Book`, `Author`, `Description`, `Genres`,
-`Avg_Rating`, `Num_Ratings`, `URL`. On-ramp is the HuggingFace `Warehouse` kind
-(RFC 0053) at a **pinned revision** — capture the dataset commit SHA in the
-loader. Download at build time; never commit the data (`data/` is gitignored).
+`Avg_Rating`, `Num_Ratings`, `URL`. The indexer loads from the HF Hub at the
+**pinned revision** `622b9c6` (RFC 0053's HuggingFace `Warehouse` kind is the
+declarative in-cluster equivalent). Download at run time; never commit the data.
 
 ## Stack & conventions
 
 - **Python 3.11+**, managed with `uv`. `indexer/` is a CLI batch job
-  (`uv run python -m indexer`); `search/` is a FastAPI service.
-- **`web/`**: a minimal single-page UI. The route badge + facet rail + result
-  list are the whole surface — keep it light (vanilla JS or one small framework;
-  do not pull in a heavy app framework).
-- **Embedder**: `BAAI/bge-small-en-v1.5` (384-d) via `fastembed` (ONNX, no
-  torch). bge is asymmetric — index with `embed_passages`, search with
-  `embed_query` (instruction prefix). A mismatch silently wrecks the semantic
-  route.
-  The *same* model must embed both documents (index time) and queries (search
-  time) — a mismatch silently wrecks the semantic route.
+  (`uv run python -m indexer`); `search/app.py` is a FastAPI service
+  (`uv run uvicorn search.app:app`) — the local-dev/reference backend.
+- **Two backends, one UI** (the same split as the SciFact demo): `search/app.py`
+  (FastAPI, fastembed) for dev, `src/worker.js` (Cloudflare Worker, Workers AI)
+  for production. Both proxy to the gateway, inject the key server-side, and
+  return the `routing`/`hybrid` echo. Keep them in lockstep.
+- **`web/static/`**: a vanilla single-page UI (no framework). The search box,
+  route badge, Routing inspector, and genre rail are the whole surface.
+- **Embedder**: `BAAI/bge-small-en-v1.5` (384-d). Index with `fastembed`
+  `embed_passages`; query with `embed_query` (dev) or Workers AI bge-small +
+  the `"Represent this sentence for searching relevant passages: "` prefix
+  (prod). bge is asymmetric and the index/query models must match — a mismatch
+  silently wrecks the semantic route.
 - **Talking to the gateway**: issue Turbopuffer-compatible queries to the
   deployed gateway; the `Auto` / `HybridText` `rank_by` values are hev layer
   extensions documented in `api/query.mdx`. Namespace: `shelf-books`.

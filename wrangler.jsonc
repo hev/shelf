@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shelf",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-23",
+  // Serve the single-page UI (and queries.json) straight from ./web/static.
+  // Assets are served first; the Worker only runs for the /api/* routes.
+  "assets": {
+    "directory": "./web/static"
+  },
+  "observability": { "enabled": true },
+  // Workers AI binding — embeds the query with the same bge-small model the
+  // indexer uses, so the semantic route's vectors are compatible.
+  "ai": { "binding": "AI" },
+  // Non-secret config. LAYER_API_KEY is a secret: `wrangler secret put LAYER_API_KEY`.
+  "vars": {
+    "LAYER_GATEWAY_URL": "https://aws-us-east-1.hevlayer.com",
+    "LAYER_NAMESPACE": "shelf-books"
+  },
+  // Live demo hostname. The zone hevlayer.com must already exist in this account;
+  // Cloudflare provisions the DNS record + certificate automatically on deploy.
+  "routes": [
+    { "pattern": "shelf.hevlayer.com", "custom_domain": true }
+  ]
+}

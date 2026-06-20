@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shelf · query routing on hev layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* hev brand — light mode tokens (editorial), ported from the hybrid-text demo */
+  :root{
+    --paper:#fafaf5; --paper-warm:#f4f0e6; --ink:#111111; --ink-soft:#2a2a28;
+    --muted:#6b6b66; --signal:#e25822; --signal-dark:#c2451b; --rule:#e8e5dc;
+    --semantic:#2f6f6a; --fused:#7a5bb0; --hybrid:#c2451b;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:16px/1.65 "Inter",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  a{color:inherit;text-decoration:none}
+  code{font-family:var(--mono);font-size:.9em;background:var(--paper-warm);
+    border-radius:2px;padding:.05em .3em;color:var(--ink)}
+  @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+  /* ---------- header / nav ---------- */
+  .site-header{position:sticky;top:0;z-index:10;
+    background:rgba(250,250,245,.85);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--rule);padding:1rem 2rem}
+  .nav{max-width:1060px;margin:0 auto;min-height:2rem;display:flex;
+    justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:.875rem}
+  .wordmark{font-family:var(--mono);font-weight:700;font-size:1.0625rem;
+    letter-spacing:-.02em;display:inline-flex;align-items:center;color:var(--ink)}
+  .wordmark .cursor{display:inline-block;width:.5em;height:1em;background:var(--signal);
+    margin-left:.18em;vertical-align:text-bottom;animation:blink 1.2s steps(2) infinite}
+  .wordmark .suffix{color:var(--muted);font-weight:500;margin-left:.4em}
+  .nav-links{display:flex;gap:1.5rem;align-items:center}
+  .nav-links a{color:var(--ink-soft);position:relative;transition:color .15s ease}
+  .nav-links a:hover{color:var(--signal)}
+  .gh{display:inline-flex;align-items:center;gap:7px}
+  .gh svg{width:18px;height:18px;fill:currentColor;display:block}
+  @media(max-width:560px){.gh .ghtxt{display:none}}
+
+  /* ---------- intro ---------- */
+  .wrap{max-width:1060px;margin:0 auto;padding:3rem 2rem 5rem}
+  .kicker{font-family:var(--mono);font-size:.75rem;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 1rem}
+  .kicker::before{content:"// ";color:var(--signal)}
+  header h1{font-family:var(--mono);font-size:clamp(1.8rem,4vw,2.6rem);line-height:1.05;
+    letter-spacing:-.035em;margin:0 0 1rem;font-weight:700}
+  header h1 code{background:none;padding:0;font-size:inherit;color:var(--signal)}
+  header p{color:var(--ink-soft);margin:0 0 .75rem;max-width:680px;font-size:1.0625rem;line-height:1.6}
+  header p b{color:var(--ink);font-weight:600}
+  .intro-link a{font-family:var(--mono);font-size:.8125rem;color:var(--signal)}
+  .intro-link a:hover{color:var(--signal-dark)}
+  .intro-link code{background:none;padding:0;color:inherit}
+
+  /* ---------- search ---------- */
+  .search{display:flex;gap:8px;margin-top:2rem}
+  .search input{flex:1;background:var(--paper-warm);border:1px solid var(--rule);color:var(--ink);
+    padding:14px 16px;border-radius:2px;font-size:1rem;font-family:inherit;outline:none;
+    transition:border-color .15s ease}
+  .search input:focus{border-color:var(--signal)}
+  .search button{background:var(--signal);color:var(--paper);border:0;padding:0 24px;border-radius:2px;
+    font-family:var(--mono);font-weight:700;cursor:pointer;font-size:.9rem;transition:background .15s ease}
+  .search button:hover{background:var(--signal-dark)}
+  .hint{color:var(--muted);font-family:var(--mono);font-size:.75rem;margin:.6rem 2px 0}
+
+  /* ---------- chips ---------- */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:1.5rem 0 .25rem}
+  .chips .lbl{width:100%;color:var(--muted);font-family:var(--mono);font-size:.72rem;
+    letter-spacing:.02em;margin-bottom:.35rem}
+  .chips .lbl::before{content:"// ";color:var(--signal)}
+  .chip{background:var(--paper-warm);border:1px solid var(--rule);color:var(--ink-soft);border-radius:2px;
+    padding:6px 13px;font-size:.875rem;font-family:inherit;cursor:pointer;max-width:460px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;transition:border-color .15s ease,color .15s ease}
+  .chip:hover{border-color:var(--signal);color:var(--ink)}
+  .chip.typo{border-style:dashed}
+
+  /* ---------- results ---------- */
+  .layout{display:grid;grid-template-columns:1fr 290px;gap:22px;margin-top:2rem;align-items:start}
+  @media(max-width:820px){.layout{grid-template-columns:1fr}}
+  .results .meta{color:var(--muted);font-family:var(--mono);font-size:.8125rem;margin:0 0 1rem;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .card{background:var(--paper-warm);border:1px solid var(--rule);border-radius:2px;
+    padding:14px 16px;margin-bottom:10px;transition:border-color .15s ease}
+  .card:hover{border-color:var(--signal)}
+  .card h3{margin:0 0 3px;font-family:var(--mono);font-size:.95rem;font-weight:700;
+    line-height:1.35;letter-spacing:-.01em}
+  .card h3 a:hover{color:var(--signal)}
+  .card .by{color:var(--muted);font-size:.8125rem;margin:0 0 7px}
+  .card .snip{color:var(--ink-soft);font-size:.9375rem;margin:0;line-height:1.55}
+  .card .row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px}
+  .card .tags{display:flex;gap:5px;flex-wrap:wrap}
+  .tag{font-family:var(--mono);font-size:.6875rem;color:var(--muted);border:1px solid var(--rule);
+    border-radius:2px;padding:1px 6px}
+  .score{font-family:var(--mono);color:var(--muted);font-size:.75rem;white-space:nowrap}
+  .stars{color:var(--signal)}
+  mark{background:rgba(226,88,34,.18);color:inherit;border-radius:2px;padding:0 1px}
+
+  /* ---------- route badge ---------- */
+  .route-badge{font-family:var(--mono);font-size:.6875rem;font-weight:700;letter-spacing:.04em;
+    border-radius:2px;padding:2px 8px;text-transform:lowercase;border:1px solid}
+  .route-badge.hybrid_text{color:var(--hybrid);border-color:var(--hybrid)}
+  .route-badge.fused{color:var(--fused);border-color:var(--fused)}
+  .route-badge.semantic{color:var(--semantic);border-color:var(--semantic)}
+
+  /* ---------- right rail (inspector + facets) ---------- */
+  .rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:5rem}
+  .panel{background:var(--paper-warm);border:1px solid var(--rule);border-left:3px solid var(--signal);
+    border-radius:2px;padding:16px 18px}
+  .panel.routing{border-left-color:var(--signal)}
+  .panel h2{font-family:var(--mono);font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;
+    color:var(--muted);margin:0 0 14px;font-weight:700}
+  .panel h2::before{content:"// ";color:var(--signal)}
+  .panel .routeline{font-size:.8125rem;color:var(--ink-soft);margin:0 0 12px;line-height:1.55}
+  .panel .routeline b{color:var(--ink);font-weight:600}
+  .panel .legs{font-size:.8125rem;color:var(--ink-soft);margin:10px 0 12px;line-height:1.55}
+  .panel .legs b{color:var(--ink);font-weight:600}
+  .panel .cap{font-family:var(--mono);font-size:.6875rem;color:var(--muted);margin:0 0 8px;
+    text-transform:uppercase;letter-spacing:.08em}
+  .panel .cap a{color:var(--signal)}
+  .kv{display:flex;justify-content:space-between;font-size:.8125rem;padding:6px 0;border-bottom:1px solid var(--rule)}
+  .kv:last-child{border-bottom:0}
+  .kv span:first-child{color:var(--muted)}
+  .kv span:last-child{font-family:var(--mono);color:var(--ink-soft)}
+  .tok{display:inline-block;background:var(--paper);border:1px solid var(--rule);border-radius:2px;
+    padding:2px 7px;margin:0 4px 4px 0;font-family:var(--mono);font-size:.75rem;color:var(--ink-soft)}
+  .facet{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;
+    font-size:.8125rem;padding:5px 7px;margin:0 -7px;border-radius:2px;transition:background .12s ease}
+  .facet:hover{background:var(--paper)}
+  .facet.active{background:var(--paper);color:var(--signal);font-weight:600}
+  .facet .n{font-family:var(--mono);font-size:.6875rem;color:var(--muted)}
+  .facet.active .n{color:var(--signal)}
+  .clearf{font-family:var(--mono);font-size:.6875rem;color:var(--signal);cursor:pointer;margin-top:10px;
+    display:inline-block}
+
+  /* ---------- states ---------- */
+  .empty{color:var(--muted);padding:1.6rem 0}
+  .err{color:var(--signal-dark)}
+  .lat{color:var(--signal);font-weight:700;font-family:var(--mono)}
+
+  /* ---------- footer ---------- */
+  .site-footer{border-top:1px solid var(--rule);padding:2.5rem 2rem 3rem;
+    font-family:var(--mono);font-size:.75rem;color:var(--muted)}
+  .footer-inner{max-width:1060px;margin:0 auto;display:flex;gap:.75rem;
+    align-items:baseline;flex-wrap:wrap}
+  .footer-inner .here{color:var(--ink-soft);text-decoration:underline;
+    text-decoration-color:var(--rule);text-underline-offset:3px}
+  .footer-inner a{color:var(--muted);transition:color .15s ease}
+  .footer-inner a:hover{color:var(--signal)}
+  .footer-inner .dot{color:var(--rule)}
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav">
+      <a class="wordmark" href="https://hevlayer.com" target="_blank" rel="noopener" aria-label="hev layer — home">
+        hev<span class="cursor" aria-hidden="true"></span><span class="suffix">layer</span>
+      </a>
+      <div class="nav-links">
+        <a href="https://hevlayer.com/docs/api/query/#query-routing" target="_blank" rel="noopener">docs</a>
+        <a class="gh" href="https://github.com/hev/shelf" target="_blank" rel="noopener"
+           aria-label="View source on GitHub" title="View source on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>
+          <span class="ghtxt">GitHub</span>
+        </a>
+      </div>
+    </nav>
+  </header>
+<div class="wrap">
+  <header>
+    <p class="kicker">hev layer · demo</p>
+    <h1>shelf &middot; <code>query routing</code></h1>
+    <p>One search box, three strategies. The Layer-only <b>Auto</b> rank
+       expression reads the shape of each query — a bare author or title, a few
+       words, or a full sentence — and routes it to <b>hybrid_text</b>
+       (BM25 + fuzzy), <b>semantic</b> (ANN over embeddings), or both
+       <b>fused</b> by reciprocal rank fusion. The badge shows which fired, and
+       why. ~10,000 books from
+       <a href="https://huggingface.co/datasets/Eitanli/goodreads" target="_blank" rel="noopener">Goodreads</a>.</p>
+    <p class="intro-link">→ <a href="https://hevlayer.com/docs/api/query/#query-routing" target="_blank" rel="noopener">How <code>Auto</code> routing works (Layer docs)</a></p>
+  </header>
+
+  <div class="search">
+    <input id="q" placeholder="try: Sanderson · the name of the wind · a lonely robot learning to be human" autocomplete="off" autofocus>
+    <button id="go">Search</button>
+  </div>
+  <div class="hint" id="hint"></div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="layout">
+    <div class="results" id="results">
+      <div class="empty">Search the catalog, or pick a query above.</div>
+    </div>
+    <aside class="rail" id="rail" style="display:none">
+      <div class="panel routing" id="panel">
+        <h2>Routing inspector</h2>
+        <div id="panelBody"></div>
+      </div>
+      <div class="panel facets" id="facetPanel" style="display:none">
+        <h2>Narrow by genre</h2>
+        <div id="facetBody"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <span class="here">layer</span>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href="https://hevmind.com">mind</a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href="https://hevask.com">ask</a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href="https://github.com/hev/shelf" target="_blank" rel="noopener">source</a>
+    <span class="dot" aria-hidden="true">·</span>
+    <span>© hev</span>
+  </div>
+</footer>
+
+<script>
+  const qInput = document.getElementById('q');
+  const results = document.getElementById('results');
+  const rail = document.getElementById('rail');
+  const panelBody = document.getElementById('panelBody');
+  const facetPanel = document.getElementById('facetPanel');
+  const facetBody = document.getElementById('facetBody');
+  const chipsEl = document.getElementById('chips');
+  const hint = document.getElementById('hint');
+
+  let cfg = { namespace: '', field: 'text' };
+  let activeGenre = null;   // current genre filter, or null
+
+  const ROUTE_DESC = {
+    hybrid_text: 'Short, keyword-shaped input — a <b>BM25</b> leg + one <b>fuzzy</b> leg per token, fused by RRF. No vector used.',
+    fused: 'Mid-length input — keyword <b>and</b> semantic legs, merged upstream by <b>reciprocal rank fusion</b>.',
+    semantic: 'Long, natural-language input — <b>ANN</b> over the query embedding (bge-small).',
+  };
+
+  const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const commas = n => (n == null ? '' : Number(n).toLocaleString('en-US'));
+
+  function highlight(text, tokens) {
+    const out = esc(text);
+    if (!tokens || !tokens.length) return out;
+    const toks = [...tokens].sort((a, b) => b.length - a.length)
+      .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    return out.replace(new RegExp('(' + toks.join('|') + ')', 'ig'), '<mark>$1</mark>');
+  }
+
+  async function loadConfig() {
+    try { cfg = await (await fetch('/api/config')).json(); } catch (e) {}
+    hint.textContent = `namespace: ${cfg.namespace} · Auto routes over the ${cfg.field} field`;
+  }
+
+  async function loadExamples() {
+    let ex = [];
+    try { ex = (await (await fetch('/api/examples')).json()).examples || []; } catch (e) {}
+    if (!ex.length) return;
+    chipsEl.innerHTML = '<div class="lbl">Each query lands on a different route — watch the badge. Dashed = a typo the fuzzy legs still catch.</div>';
+    ex.forEach(e => {
+      const c = document.createElement('button');
+      c.className = 'chip' + (e.typo ? ' typo' : '');
+      c.textContent = e.text;
+      if (e.note) c.title = e.note;
+      c.onclick = () => { qInput.value = e.text; run(); };
+      chipsEl.appendChild(c);
+    });
+  }
+
+  async function run(genre = null) {
+    const query = qInput.value.trim();
+    if (!query) return;
+    activeGenre = genre;
+    results.innerHTML = '<div class="empty">Searching…</div>';
+    let data;
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, top_k: 12, genre }),
+      });
+      if (!r.ok) { results.innerHTML = '<div class="empty err">' + esc('Error ' + r.status + ': ' + await r.text()) + '</div>'; rail.style.display = 'none'; return; }
+      data = await r.json();
+    } catch (e) {
+      results.innerHTML = '<div class="empty err">' + esc(String(e)) + '</div>'; rail.style.display = 'none'; return;
+    }
+    data.round_trip_ms = Math.round(performance.now() - t0);
+    render(data);
+  }
+
+  function render(data) {
+    const rows = data.rows || [];
+    const routing = data.routing;
+    const tokens = data.hybrid ? data.hybrid.tokens : [];
+
+    let html = '<p class="meta">';
+    if (routing) html += '<span class="route-badge ' + esc(routing.route) + '">' + esc(routing.route) + '</span>';
+    html += '<span>' + rows.length + ' result' + (rows.length === 1 ? '' : 's');
+    if (activeGenre) html += ' · genre: ' + esc(activeGenre);
+    if (data.took_ms != null) html += ' · <span class="lat">⚡ ' + esc(String(data.took_ms)) + ' ms</span> gateway';
+    html += '</span></p>';
+
+    if (!rows.length) html += '<div class="empty">No matches.</div>';
+    rows.forEach(r => {
+      const title = highlight(r.title || ('book ' + r.id), tokens);
+      const series = r.series ? ' <span class="by">(' + esc(r.series) + ')</span>' : '';
+      const raw = r.description || '';
+      const snip = highlight(raw.slice(0, 260) + (raw.length > 260 ? '…' : ''), tokens);
+      const sv = r['$score'] != null ? r['$score'] : r['$dist'];
+      const score = sv != null ? Number(sv).toFixed(4) : '—';
+      const link = r.url ? '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">' + title + '</a>' : title;
+      const tags = (r.genres || []).slice(0, 3).map(g => '<span class="tag">' + esc(g) + '</span>').join('');
+      const stars = r.avg_rating != null ? '<span class="stars">★ ' + Number(r.avg_rating).toFixed(2) + '</span>' : '';
+      const ratings = r.num_ratings != null ? ' · ' + commas(r.num_ratings) + ' ratings' : '';
+      html += '<div class="card">' +
+        '<h3>' + link + series + '</h3>' +
+        '<p class="by">' + esc(r.author || '') + '</p>' +
+        '<p class="snip">' + snip + '</p>' +
+        '<div class="row"><span class="tags">' + tags + '</span>' +
+        '<span class="score">' + stars + ratings + ' · ' + score + '</span></div>' +
+        '</div>';
+    });
+    results.innerHTML = html;
+    rail.style.display = '';
+    renderPanel(routing, data.hybrid, data.took_ms);
+    renderFacets(data.facets || []);
+  }
+
+  function renderPanel(routing, h, tookMs) {
+    if (!routing) { panelBody.innerHTML = '<div class="empty">—</div>'; return; }
+    const kv = (k, v) => '<div class="kv"><span>' + k + '</span><span>' + esc(String(v)) + '</span></div>';
+    let body = '<div class="routeline"><span class="route-badge ' + esc(routing.route) + '">' + esc(routing.route) +
+      '</span></div>';
+    body += '<div class="routeline">' + (ROUTE_DESC[routing.route] || '') + '</div>';
+    body += kv('policy', routing.policy) + kv('tokens', routing.tokens) + kv('executed', routing.executed);
+    if (h) {
+      const fuzzy = (h.legs || 1) - 1;
+      body += '<div class="cap" style="margin-top:14px">tokens · <a href="https://github.com/turbopuffer/alyze" target="_blank" rel="noopener">alyze tokenizer</a></div>';
+      body += '<div>' + (h.tokens || []).map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
+      body += '<div class="legs">' + h.legs + ' legs upstream: <b>1 BM25</b> + <b>' + fuzzy +
+        ' fuzzy</b> (one per token), fused by RRF.</div>';
+      body += kv('fuzziness', h.fuzziness) + kv('rank_constant', h.rank_constant) + kv('per_leg_limit', h.per_leg_limit);
+    }
+    if (tookMs != null) body += '<div class="legs" style="margin-top:10px"><span class="lat">⚡ ' + esc(String(tookMs)) +
+      ' ms</span> — routed, executed &amp; returned (edge-measured).</div>';
+    panelBody.innerHTML = body;
+  }
+
+  function renderFacets(facets) {
+    if (!facets.length && !activeGenre) { facetPanel.style.display = 'none'; return; }
+    facetPanel.style.display = '';
+    let body = '';
+    facets.forEach(f => {
+      const on = activeGenre === f.genre;
+      body += '<div class="facet' + (on ? ' active' : '') + '" data-g="' + esc(f.genre) + '">' +
+        '<span>' + esc(f.genre) + '</span><span class="n">' + f.count + '</span></div>';
+    });
+    if (activeGenre) body += '<span class="clearf" id="clearf">✕ clear genre filter</span>';
+    facetBody.innerHTML = body;
+    facetBody.querySelectorAll('.facet').forEach(el =>
+      el.onclick = () => run(el.dataset.g === activeGenre ? null : el.dataset.g));
+    const clr = document.getElementById('clearf');
+    if (clr) clr.onclick = () => run(null);
+  }
+
+  document.getElementById('go').onclick = () => run();
+  qInput.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+
+  (async () => { await loadConfig(); await loadExamples(); })();
+</script>
+</body>
+</html>

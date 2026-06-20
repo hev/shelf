@@ -23,6 +23,8 @@ data/
 .env
 .env.local
 *.local
+.dev.vars
+.wrangler/
 
 # Editor / OS
 .DS_Store

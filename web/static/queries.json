@@ -1,0 +1,10 @@
+{
+  "examples": [
+    { "text": "Sanderson", "note": "one keyword token → hybrid_text (BM25 + fuzzy), no vector. Top hit: Brandon Sanderson." },
+    { "text": "brandon sandrson", "typo": true, "note": "misspelled → hybrid_text; the fuzzy legs still surface Brandon Sanderson." },
+    { "text": "wizard school chosen one", "note": "a few words → fused: keyword ⊕ semantic, merged by RRF. Top hit: Harry Potter." },
+    { "text": "the lord of the rings", "note": "a title → fused: BM25 over the words plus semantic neighbours. Tolkien, top to bottom." },
+    { "text": "a lonely robot learning what it means to be human", "note": "long natural language → semantic: ANN over descriptions. Top hit: I, Robot." },
+    { "text": "a sprawling epic fantasy with morally grey characters and political intrigue", "note": "describe the vibe → semantic. Surfaces Words of Radiance." }
+  ]
+}
