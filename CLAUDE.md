@@ -46,11 +46,15 @@ loader. Download at build time; never commit the data (`data/` is gitignored).
 
 ## Stack & conventions
 
-- **Python 3.11+**, FastAPI for both `indexer/` and `search/`.
+- **Python 3.11+**, managed with `uv`. `indexer/` is a CLI batch job
+  (`uv run python -m indexer`); `search/` is a FastAPI service.
 - **`web/`**: a minimal single-page UI. The route badge + facet rail + result
   list are the whole surface — keep it light (vanilla JS or one small framework;
   do not pull in a heavy app framework).
-- **Embedder**: `BAAI/bge-small-en-v1.5` (384-d) via sentence-transformers.
+- **Embedder**: `BAAI/bge-small-en-v1.5` (384-d) via `fastembed` (ONNX, no
+  torch). bge is asymmetric — index with `embed_passages`, search with
+  `embed_query` (instruction prefix). A mismatch silently wrecks the semantic
+  route.
   The *same* model must embed both documents (index time) and queries (search
   time) — a mismatch silently wrecks the semantic route.
 - **Talking to the gateway**: issue Turbopuffer-compatible queries to the

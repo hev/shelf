@@ -1,0 +1,30 @@
+[project]
+name = "shelf"
+version = "0.1.0"
+description = "Book search that shows its routing — a query-routing demo on hev layer"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "hevlayer",
+    "fastembed>=0.4",
+    "datasets>=3.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+]
+
+[project.optional-dependencies]
+search = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+# Run-as-app, not build-as-package: uv only manages the dependency venv;
+# `uv run python -m indexer` finds shelf_common/ and indexer/ on the cwd path.
+[tool.uv]
+package = false
+
+# hevlayer is not on PyPI yet (0.1, design-partner phase). Source it editable
+# from the sibling layer checkout; flip to a plain PyPI pin when it publishes.
+[tool.uv.sources]
+hevlayer = { path = "../layer/clients/python", editable = true }

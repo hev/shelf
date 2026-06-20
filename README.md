@@ -46,9 +46,12 @@ Wire shapes are authoritative in the gateway docs, not here: see the
 
 Pinned to [`Eitanli/goodreads`](https://huggingface.co/datasets/Eitanli/goodreads)
 on the HuggingFace Hub — **MIT-licensed**, ~10k popular Goodreads books across
-genres. Loaded through hev layer's HuggingFace `Warehouse` kind
+genres, at revision `622b9c6`. The indexer loads it from the Hub at that pinned
+revision and upserts through the gateway — the same source hev layer's
+HuggingFace `Warehouse` kind
 ([RFC 0053](https://github.com/hev/layer/blob/main/docs/rfcs/0053-huggingface-warehouse-kind.md))
-at a pinned revision; the data is downloaded at build time, never committed.
+reads declaratively in a full cluster deployment. The data is downloaded at run
+time, never committed.
 
 Fields used:
 
