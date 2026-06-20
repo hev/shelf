@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / web
+node_modules/
+dist/
+.next/
+.astro/
+
+# Local data + caches (dataset is downloaded, never committed)
+data/
+.cache/
+*.parquet
+*.jsonl
+
+# Env / secrets — never commit the gateway key
+.env
+.env.local
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
