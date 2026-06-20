@@ -30,3 +30,6 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code — local session traces (machine-local, not shareable)
+.claude/traces/
