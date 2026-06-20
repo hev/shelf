@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections import Counter
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -25,10 +24,12 @@ from pydantic import BaseModel
 
 from shelf_common.config import Settings
 from shelf_common.embed import Embedder
+from shelf_common.gateway import FACET_FIELD, latest_facets
 
 WEB = Path(__file__).resolve().parent.parent / "web" / "static"
 INCLUDE = ["title", "author", "series", "description", "genres", "avg_rating", "num_ratings", "url"]
 TRANSIENT = {502, 503, 504}
+FACET_TTL = 300.0  # corpus facets are query-independent; cache the snapshot read
 
 settings = Settings()
 embedder = Embedder(settings.embed_model)
@@ -47,12 +48,9 @@ class SearchRequest(BaseModel):
     genre: str | None = None
 
 
-def _facets(rows: list[dict]) -> list[dict]:
-    counts: Counter[str] = Counter()
-    for row in rows:
-        for genre in row.get("genres") or []:
-            counts[genre] += 1
-    return [{"genre": g, "count": n} for g, n in counts.most_common(14)]
+# Corpus facets come from a materialized snapshot (deploy/index.yaml's
+# facetFields), not a tally of the returned rows — so cache the read.
+_facet_cache: dict = {"at": 0.0, "facets": None, "snapshot": None}
 
 
 @app.get("/")
@@ -71,11 +69,28 @@ def examples() -> dict:
     return json.loads(path.read_text()) if path.exists() else {"examples": []}
 
 
+@app.get("/api/facets")
+async def facets() -> dict:
+    """Corpus-wide genre rail, read from the latest facet snapshot. Query-
+    independent, so it's cached; empty (rail hidden) until a snapshot exists."""
+    now = time.monotonic()
+    cached = _facet_cache["facets"]
+    if cached and now - _facet_cache["at"] <= FACET_TTL:
+        return {"field": FACET_FIELD, "facets": cached, "snapshot": _facet_cache["snapshot"]}
+    try:
+        facets, snapshot = await latest_facets(layer, settings.namespace)
+    except Exception:  # noqa: BLE001 — rail degrades to hidden on any error
+        facets, snapshot = None, None
+    if facets:
+        _facet_cache.update(at=now, facets=facets, snapshot=snapshot)
+    return {"field": FACET_FIELD, "facets": facets or [], "snapshot": snapshot}
+
+
 @app.post("/api/search")
 async def search(req: SearchRequest) -> dict:
     query = req.query.strip()
     if not query:
-        return {"rows": [], "routing": None, "hybrid": None, "facets": []}
+        return {"rows": [], "routing": None, "hybrid": None}
 
     # Embed up front and hand the vector to Auto in the 4th tuple slot: the
     # gateway still picks the route from token count, but semantic/fused execute
@@ -107,7 +122,6 @@ async def search(req: SearchRequest) -> dict:
                 "rows": rows,
                 "routing": resp.routing.model_dump() if resp.routing else None,
                 "hybrid": resp.hybrid.model_dump() if resp.hybrid else None,
-                "facets": _facets(rows),
                 "took_ms": took_ms,
                 "query": query,
                 "genre": req.genre,

@@ -180,17 +180,17 @@
     <p class="kicker">hev layer · demo</p>
     <h1>shelf &middot; <code>query routing</code></h1>
     <p>One search box, three strategies. The Layer-only <b>Auto</b> rank
-       expression reads the shape of each query — a bare author or title, a few
-       words, or a full sentence — and routes it to <b>hybrid_text</b>
-       (BM25 + fuzzy), <b>semantic</b> (ANN over embeddings), or both
-       <b>fused</b> by reciprocal rank fusion. The badge shows which fired, and
+       expression reads each query by length and routes it: a bare author or
+       title to <b>hybrid_text</b> (BM25 + fuzzy), a few words to both legs
+       <b>fused</b> by reciprocal rank fusion, and a full sentence to
+       <b>semantic</b> (ANN over embeddings). The badge shows which fired, and
        why. ~10,000 books from
        <a href="https://huggingface.co/datasets/Eitanli/goodreads" target="_blank" rel="noopener">Goodreads</a>.</p>
     <p class="intro-link">→ <a href="https://hevlayer.com/docs/api/query/#query-routing" target="_blank" rel="noopener">How <code>Auto</code> routing works (Layer docs)</a></p>
   </header>
 
   <div class="search">
-    <input id="q" placeholder="try: Sanderson · the name of the wind · a lonely robot learning to be human" autocomplete="off" autofocus>
+    <input id="q" placeholder="try: the lord of the rings · a child wizard story · harry poter" autocomplete="off" autofocus>
     <button id="go">Search</button>
   </div>
   <div class="hint" id="hint"></div>
@@ -240,7 +240,9 @@
   const cap = (ev, props) => { try { window.posthog && posthog.capture(ev, props); } catch (e) {} };
 
   let cfg = { namespace: '', field: 'text' };
-  let activeGenre = null;   // current genre filter, or null
+  let activeGenre = null;      // current genre filter, or null
+  let corpusFacets = [];       // corpus-wide genre rail from the facet snapshot
+  let facetSnapshot = null;    // its provenance: { sha, watermark_ms, row_count }
 
   const ROUTE_DESC = {
     hybrid_text: 'Short, keyword-shaped input — a <b>BM25</b> leg + one <b>fuzzy</b> leg per token, fused by RRF. No vector used.',
@@ -264,11 +266,23 @@
     hint.textContent = `namespace: ${cfg.namespace} · Auto routes over the ${cfg.field} field`;
   }
 
+  async function loadFacets() {
+    // The genre rail is a materialized facet snapshot (corpus-wide counts),
+    // not a tally of the returned rows — query-independent, so load it once.
+    try {
+      const d = await (await fetch('/api/facets')).json();
+      corpusFacets = d.facets || [];
+      facetSnapshot = d.snapshot || null;
+    } catch (e) {}
+    // If a search already painted the rail before this resolved, refresh it.
+    if (rail.style.display !== 'none') renderFacets();
+  }
+
   async function loadExamples() {
     let ex = [];
     try { ex = (await (await fetch('/api/examples')).json()).examples || []; } catch (e) {}
     if (!ex.length) return;
-    chipsEl.innerHTML = '<div class="lbl">Each query lands on a different route — watch the badge. Dashed = a typo the fuzzy legs still catch.</div>';
+    chipsEl.innerHTML = '<div class="lbl">Most of these route to <b>fused</b> (keyword ⊕ semantic). Dashed chips are typos the fuzzy legs catch on <b>hybrid_text</b>; the long sentence routes to <b>semantic</b>. Watch the badge.</div>';
     ex.forEach(e => {
       const c = document.createElement('button');
       c.className = 'chip' + (e.typo ? ' typo' : '');
@@ -336,7 +350,7 @@
     results.dataset.route = routing ? routing.route : '';
     rail.style.display = '';
     renderPanel(routing, data.hybrid, data.took_ms);
-    renderFacets(data.facets || []);
+    renderFacets();
     cap('search_performed', {
       query: data.query,
       route: routing ? routing.route : null,
@@ -368,16 +382,23 @@
     panelBody.innerHTML = body;
   }
 
-  function renderFacets(facets) {
-    if (!facets.length && !activeGenre) { facetPanel.style.display = 'none'; return; }
+  function renderFacets() {
+    // Corpus-wide genre histogram from the snapshot; counts are catalog-wide,
+    // not per-result. Hidden when no snapshot has been materialized yet.
+    if (!corpusFacets.length && !activeGenre) { facetPanel.style.display = 'none'; return; }
     facetPanel.style.display = '';
     let body = '';
-    facets.forEach(f => {
-      const on = activeGenre === f.genre;
-      body += '<div class="facet' + (on ? ' active' : '') + '" data-g="' + esc(f.genre) + '">' +
-        '<span>' + esc(f.genre) + '</span><span class="n">' + f.count + '</span></div>';
+    corpusFacets.forEach(f => {
+      const on = activeGenre === f.value;
+      body += '<div class="facet' + (on ? ' active' : '') + '" data-g="' + esc(f.value) + '">' +
+        '<span>' + esc(f.value) + '</span><span class="n">' + commas(f.count) + '</span></div>';
     });
     if (activeGenre) body += '<span class="clearf" id="clearf">✕ clear genre filter</span>';
+    if (facetSnapshot) body += '<div class="cap" style="margin-top:12px" ' +
+      'title="materialized facet histogram — a hev layer snapshot, declared in deploy/index.yaml">' +
+      'facet snapshot · ' + esc((facetSnapshot.sha || '').slice(0, 7)) +
+      (facetSnapshot.row_count != null ? ' · ' + commas(facetSnapshot.row_count) + ' books' : '') +
+      '</div>';
     facetBody.innerHTML = body;
     facetBody.querySelectorAll('.facet').forEach(el =>
       el.onclick = () => {
@@ -396,7 +417,7 @@
     if (a) cap('result_clicked', { title: a.textContent, route: results.dataset.route || null });
   });
 
-  (async () => { await loadConfig(); await loadExamples(); })();
+  (async () => { await loadConfig(); await loadExamples(); loadFacets(); })();
 </script>
 </body>
 </html>

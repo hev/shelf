@@ -1,0 +1,51 @@
+# Index — operational policy for the shelf-books namespace.
+#
+# This is the CR the original question was about: "where do we declare the
+# snapshots for the facets?" Here — `spec.snapshot.facetFields`.
+#
+# A snapshot in hev layer IS a materialized facet histogram: per-field distinct
+# values and their counts, written durably to S3 (mirrored in Aerospike for the
+# latest body). Listing `genres` under facetFields turns on the automatic
+# snapshot writer for that field; the gateway then re-materializes the genre
+# histogram on each upstream-stable advance (floored by `interval`), and the
+# search backends read it back to draw the genre rail (GET /api/facets →
+# latest_genre_facets() in shelf_common/gateway.py).
+#
+# The imperative equivalent — for the shared deployed gateway, where shelf does
+# NOT own this CR — is the indexer calling create_snapshot(field="genres",
+# source="origin") once after upserting (indexer/index.py). Same materialized
+# body, triggered by code instead of by the auto-writer. That is the whole point
+# of this bundle: the declarative knob and the imperative call are the same
+# shipped feature, two ways.
+#
+# NOTE: the column SCHEMA (text → FTS+fuzzy, description non-filterable, the
+# float/int facet types) is NOT here — it is asserted inline and idempotently on
+# every write (shelf_common/gateway.py:SCHEMA). The Index CR owns *operational*
+# policy: snapshots/facets, cache, scan fan-out, consistency. See
+# docs/kubernetes/index-crd in ../layer.
+apiVersion: hevlayer.com/v1
+kind: Index
+metadata:
+  name: shelf-books
+  namespace: shelf
+spec:
+  backend:
+    storeRef: turbopuffer-default
+    namespace: shelf-books
+    distanceMetric: cosine_distance
+  metadata:
+    labels:
+      app: shelf
+    tags:
+      - books
+      - routing-demo
+  # --- The answer: declare the facet snapshots here. ---
+  snapshot:
+    facetFields:
+      - genres        # the genre rail. avg_rating/num_ratings are continuous,
+                      # not facet-shaped, so they are deliberately not listed.
+    interval: 5m      # min spacing; event-driven on each upstream-stable advance
+    retention: never  # ~10k books, one small field — keep all history
+  scan:
+    threads: 8        # origin scan fan-out for the snapshot writer's corpus scan
+  consistency: strong

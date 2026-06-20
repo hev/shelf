@@ -3,12 +3,12 @@
 **[Live demo → shelf.hevlayer.com](https://shelf.hevlayer.com)**
 
 **Book search that shows its routing.** A micro-app over [hev layer](https://hevlayer.com)
-where the hero isn't the results — it's the badge that tells you *how* the
-gateway searched. Type an author, a title, or a vibe, and watch the same search
-box route the query to keyword, semantic, or a fusion of both, and say why.
+whose hero is the routing badge: it shows *how* the gateway searched, not just
+the results. Type an author, a title, or a vibe, and watch the same search box
+route the query to keyword, semantic, or a fusion of both, and say why.
 
 `shelf` is a UX-shaped demo. Its sibling [hybrid-text-fusion-demo](https://github.com/hev/hybrid-text-fusion-demo)
-(SciFact) is eval-shaped — it proves hybrid retrieval with qrels and recall
+(SciFact) is eval-shaped: it proves hybrid retrieval with qrels and recall
 numbers. `shelf` proves the **query router**: it makes the routing decision
 legible on a corpus where the three routes have obviously different intents.
 
@@ -21,7 +21,7 @@ decision alongside the results. `shelf` renders that decision as a badge.
 | Query | Tokens | Route | Why |
 |---|---|---|---|
 | `Sanderson` | 1 | **hybrid_text** | Short and keyword-shaped — BM25 + fuzzy over the text field, no vector needed. |
-| `branden sandersn` | 2 | **hybrid_text** | Same route; the fuzzy legs ([RFC 0057](https://github.com/hev/layer/blob/main/docs/rfcs/0057-hybrid-text-fuzzy-surfacing.md)) still surface Brandon Sanderson through the typos. |
+| `branden sandersn` | 2 | **hybrid_text** | Same route; the fuzzy legs ([RFC 0057](https://github.com/hev/layer/blob/main/docs/rfcs/0057-hybrid-text-fuzzy-surfacing.md)) still find Brandon Sanderson through the typos. |
 | `the name of the wind` | 4 | **fused** | Mid-length — exact-title BM25 *and* semantic, merged by Turbopuffer-native RRF. |
 | `sprawling epic fantasy with morally grey characters and political intrigue` | 10 | **semantic** | Long and natural-language — ANN over description embeddings. |
 
@@ -31,14 +31,17 @@ on each route so the badge visibly changes.
 
 ## Built on shipped hev layer features
 
-`shelf` reimplements nothing — fusion, routing, and fuzzy matching all live in
-the gateway. The app only composes them:
+`shelf` reimplements nothing. Fusion, routing, and fuzzy matching all live in
+the gateway; the app only composes them:
 
 - **Hybrid text fusion** ([RFC 0022](https://github.com/hev/layer/blob/main/docs/rfcs/archive/0022-hybrid-text-fusion.md)) —
   the `HybridText` expansion: per-token fuzzy legs + a BM25 leg → upstream RRF.
 - **Query router** (RFC 0044, phase 1) — the `Auto` expression and its
   routing decision block.
 - **Fuzzy surfacing** (RFC 0057) — typo'd queries still return rows.
+- **Facet snapshots** — the genre rail is a materialized facet histogram with
+  visible provenance (corpus-wide counts, not a tally of the returned rows).
+  Declared on the namespace's `Index` CR; see [Declarative config](#declarative-config).
 
 Wire shapes are authoritative in the gateway docs, not here: see the
 **Hybrid text fusion** and **Query routing** sections of
@@ -47,8 +50,8 @@ Wire shapes are authoritative in the gateway docs, not here: see the
 ## Dataset
 
 Pinned to [`Eitanli/goodreads`](https://huggingface.co/datasets/Eitanli/goodreads)
-on the HuggingFace Hub — **MIT-licensed**, ~10k popular Goodreads books across
-genres, at revision `622b9c6`. The indexer loads it from the Hub at that pinned
+on the HuggingFace Hub: an MIT-licensed set of ~10k popular Goodreads books
+across genres, at revision `622b9c6`. The indexer loads it from the Hub at that pinned
 revision and upserts through the gateway — the same source hev layer's
 HuggingFace `Warehouse` kind
 ([RFC 0053](https://github.com/hev/layer/blob/main/docs/rfcs/0053-huggingface-warehouse-kind.md))
@@ -97,11 +100,14 @@ the query at search time so semantic/fused routes resolve in one hop (see below)
 
 ```
 Eitanli/goodreads (HF, pinned 622b9c6)
-  → indexer/        CLI: load → embed (fastembed bge-small) → upsert to shelf-books
-  → search/app.py   FastAPI (dev): embed query → Auto+vector → rows + routing + hybrid + facets
+  → indexer/        CLI: load → embed (fastembed bge-small) → upsert + snapshot genres
+  → search/app.py   FastAPI (dev): embed query → Auto+vector → rows + routing + hybrid
   → src/worker.js   Cloudflare Worker (prod): same, query embedding via Workers AI bge-small
   → web/static/     vanilla single-page UI: search, route badge, Routing inspector, genre rail
+  → deploy/         declarative config: the in-cluster CR bundle the above mirrors
 ```
+
+The genre rail loads from `/api/facets` (a snapshot read), separate from search.
 
 Two backends, one UI — the same split as the SciFact demo (`server.py` +
 `src/worker.js`). The FastAPI service is the local-dev/reference path (fastembed,
@@ -125,13 +131,50 @@ phase 1; phase 2 is a footnote, not a blocker.
 ### What this demo teaches (forward note, not built)
 
 `shelf` runs the shipped **single-field** router over the composed `text`
-field, which is why `Sanderson` works at all — the author's name is in `text`.
+field, which is why `Sanderson` works at all: the author's name is in `text`.
 But a book that merely *mentions* Sanderson in its description ranks too. Real
 catalogs have several text fields with different query intents (exact author /
 exact title / semantic description) that token count alone can't disambiguate.
-That gap — **field-aware routing** — is the design question this corpus
-surfaces, the way SciFact surfaced the fuzzy-leg ranking question RFC 0057
+That gap is **field-aware routing**: the design question this corpus raises,
+the way SciFact raised the fuzzy-leg ranking question that RFC 0057
 resolved. `shelf` observes it; it does not solve it.
+
+## Declarative config
+
+hev layer apps get a clean separation: *what the data is* and *how a namespace
+behaves* live in config the operator reconciles, not in application code.
+`shelf` runs against the shared deployed gateway, so it can't own that cluster —
+it configures the gateway imperatively (schema on write, the dataset pin in
+`config.py`, a `POST /snapshots` call after indexing). [`deploy/`](deploy/) is
+the **declarative equivalent**: the in-cluster CR bundle that same setup would
+be, with a one-to-one map back to the imperative paths (see
+[`deploy/README.md`](deploy/README.md)). It's the same move the §Dataset section
+already makes for the loader and the `Warehouse` kind. The manifests are
+illustrative; the runtime paths they mirror are real.
+
+**This is where facet snapshots are declared.** A *snapshot* in hev layer is a
+materialized facet histogram — a field's distinct values and their counts,
+written durably to S3. You turn one on with
+[`Index.spec.snapshot.facetFields`](deploy/index.yaml):
+
+```yaml
+spec:
+  snapshot:
+    facetFields: [genres]   # the genre rail; ratings are continuous, not faceted
+    interval: 5m
+    retention: never
+```
+
+The gateway then re-materializes the genre histogram on each upstream-stable
+advance, and the search backends read the latest body to draw the rail —
+corpus-wide counts with the snapshot's `sha` and `row_count` shown as
+provenance. Against the shared gateway the indexer does the same thing by
+calling `create_snapshot(field="genres", source="origin")` once after upserting:
+the imperative twin of the auto-writer the CR turns on. Wire shapes are
+authoritative in the gateway docs — see
+[Snapshot History](https://hevlayer.com/docs/api/snapshots) and the
+[Index CRD](https://hevlayer.com/docs/kubernetes/index-crd) in the
+[layer](https://github.com/hev/layer) repo.
 
 ## Run it
 
@@ -149,12 +192,16 @@ the key with `wrangler secret put LAYER_API_KEY`, then `npm run deploy`.
 
 v1 scope: the routing showcase above, on the shipped gateway, ~10k books.
 
+In v1: facet snapshots over the raw `genres` field power the genre rail (see
+[Declarative config](#declarative-config)).
+
 Deliberately out of v1:
 - **UDF-minted facets.** A genre/mood tagging Function over descriptions
-  (cleaner facets than raw `Genres` tags) is a v1.1 transform-runtime cameo.
+  (cleaner facets than the raw `Genres` tags the snapshot histograms) is a v1.1
+  transform-runtime cameo.
 - **Field-aware routing.** Observed above; needs a gateway RFC, not demo code.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The Goodreads data is MIT-licensed upstream and is
+MIT; see [LICENSE](LICENSE). The Goodreads data is MIT-licensed upstream and is
 downloaded at build time, not redistributed here.

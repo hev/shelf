@@ -6,7 +6,13 @@ from collections.abc import Iterable, Iterator
 
 from shelf_common.config import Settings
 from shelf_common.embed import Embedder
-from shelf_common.gateway import close_client, make_client, write_books
+from shelf_common.gateway import (
+    FACET_FIELD,
+    close_client,
+    make_client,
+    materialize_facet_snapshot,
+    write_books,
+)
 from indexer.dataset import load_books
 
 
@@ -48,6 +54,20 @@ async def run(*, limit: int | None, batch_size: int, dry_run: bool, sample: int)
 
             total += len(rows)
             print(f"  {total} books {'embedded' if dry_run else 'indexed'}…")
+
+        # Materialize the genre facet snapshot — the imperative twin of
+        # deploy/index.yaml's snapshot.facetFields auto-writer. The search
+        # backends read this body to draw the genre rail. Best-effort: a failure
+        # here just means the rail degrades to hidden, not a failed index.
+        if layer is not None:
+            try:
+                job = await materialize_facet_snapshot(layer, settings.namespace)
+                print(
+                    f"{FACET_FIELD} facet snapshot: {job.sha} "
+                    f"({job.documents_scanned} docs scanned)"
+                )
+            except Exception as exc:  # noqa: BLE001 — snapshot is non-fatal
+                print(f"{FACET_FIELD} facet snapshot skipped: {exc}")
     finally:
         if layer is not None:
             await close_client(layer)

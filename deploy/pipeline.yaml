@@ -1,0 +1,57 @@
+# Pipeline — staged ingestion declared as config.
+#
+# Declarative equivalent of `uv run python -m indexer` (load → embed → upsert).
+# The Warehouse (deploy/warehouse.yaml) is identity; this sourceRef is the
+# *what*: dataset, split, pinned revision, and the column → attribute mapping.
+# The stock `ghcr.io/hev/huggingface-source` worker streams the dataset's
+# Parquet conversion at the pinned revision, so `spec.worker.image` is omitted.
+#
+# TWO HONEST DIVERGENCES from indexer/ — the same "observed, not hidden" posture
+# the README takes on field-aware routing:
+#
+#   1. Composed FTS field. shelf indexes a bespoke `text` = title + author +
+#      description (records.py:BookRecord.text) so the Auto router has author and
+#      title tokens to match. A stock mapping points `text` at ONE column. Here
+#      `text: Description` is the embeddable signal; title/author ride along as
+#      attributes. Reproducing the composed field exactly is a custom worker
+#      image — a finding for the worker, not config.
+#   2. Stable ids. records.py derives `gr-<id>` from the Goodreads URL. The stock
+#      source can't run that regex, so `mapping.id` is omitted and the worker
+#      synthesizes offset ids (stable within a revision). Name a natural key for
+#      anything long-lived.
+#
+# Embedding (bge-small, 384-d) is the GPU follow-on stage that shares this
+# pipelineId — the same two-stage shape as ../shop (indexer/pipelines/embed.yaml).
+# shelf's indexer does it inline with fastembed; the declarative equivalent is a
+# second Pipeline with computeClass: gpu. Omitted here to keep the source story
+# legible; see ../shop for the embed stage.
+apiVersion: hevlayer.com/v1alpha1
+kind: Pipeline
+metadata:
+  name: shelf-ingest
+  namespace: shelf
+spec:
+  pipelineId: shelf-books
+  target:
+    namespace: shelf-books
+  sourceRef:
+    kind: huggingface
+    warehouseRef: goodreads-hub
+    dataset: Eitanli/goodreads
+    split: train
+    # Pin to the exact commit the indexer reads (config.py:dataset_revision).
+    # Omitting this resolves to the dataset's current parquet-ref commit; we pin
+    # for exact-replay discipline (RFC 0053).
+    revision: 622b9c6b6d960bf75725246986852718cde070b9
+    mapping:
+      text: Description
+      attributes: [Book, Author, Genres, Avg_Rating, Num_Ratings, URL]
+    # Descriptions are short — one document per row, no chunking.
+    chunk:
+      strategy: none
+  scaling:
+    pool: cpu
+    mode: autoscale
+    replicas:
+      min: 0
+      max: 4

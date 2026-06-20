@@ -1,0 +1,24 @@
+# VectorStore — the gateway's upstream connection + inbound auth policy.
+#
+# Declarative equivalent of shelf_common/gateway.py:make_client() — the base
+# URL + bearer token the indexer and search backends pass at runtime. In a full
+# cluster the gateway reads this CR instead; `deriveFromStore` means the inbound
+# bearer token IS the upstream Turbopuffer key (the credential lives in a Secret,
+# never in the CR or this repo). See docs/kubernetes/vectorstore-crd in ../layer.
+apiVersion: hevlayer.com/v1alpha1
+kind: VectorStore
+metadata:
+  name: turbopuffer-default
+  namespace: shelf
+spec:
+  kind: turbopuffer
+  default: true
+  endpoint:
+    url: https://aws-us-east-1.turbopuffer.com
+    region: aws-us-east-1
+  credential:
+    secretRef:
+      name: shelf-turbopuffer
+      key: credential
+  inboundAuth:
+    mode: deriveFromStore

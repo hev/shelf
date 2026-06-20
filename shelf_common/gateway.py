@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from hevlayer import AsyncHevlayer
 
 from .config import Settings
+
+# The single facet field shelf snapshots. Declared declaratively in
+# deploy/index.yaml (spec.snapshot.facetFields); materialized imperatively here
+# against the shared gateway. avg_rating / num_ratings are continuous, not
+# facet-shaped, so they are deliberately excluded.
+FACET_FIELD = "genres"
 
 # Explicit schema for the columns tpuf can't (or shouldn't) infer. tpuf infers
 # only string / int / bool from the payload:
@@ -61,3 +69,51 @@ async def write_books(layer: AsyncHevlayer, namespace: str, rows: list[dict]) ->
             "schema": SCHEMA,
         },
     )
+
+
+async def materialize_facet_snapshot(
+    layer: AsyncHevlayer, namespace: str, *, field: str = FACET_FIELD, timeout: float = 180.0
+) -> Any:
+    """Materialize the facet histogram for `field` and wait for it to land.
+
+    The imperative twin of deploy/index.yaml's `snapshot.facetFields` auto-writer:
+    a `source="origin"` snapshot scans the namespace and persists the histogram
+    body to S3, which the search backends then read for the genre rail. Used by
+    the indexer because shelf doesn't own the Index CR on the shared gateway.
+    """
+    job = await layer.create_snapshot(namespace, {"field": field, "source": "origin"})
+    start = time.monotonic()
+    while job.status == "running":
+        if time.monotonic() - start > timeout:
+            raise TimeoutError(f"snapshot job {job.id} still running after {timeout:.0f}s")
+        await asyncio.sleep(1.0)
+        job = await layer.get_snapshot_job(namespace, job.id)
+    if job.status != "completed":
+        raise RuntimeError(f"snapshot job {job.id} {job.status}: {job.error or 'no detail'}")
+    return job
+
+
+async def latest_facets(
+    layer: AsyncHevlayer, namespace: str, *, field: str = FACET_FIELD, limit: int = 14
+) -> tuple[list[dict] | None, dict | None]:
+    """Read the newest stored facet snapshot for `field`.
+
+    Returns (facets, provenance) where facets is [{value, count}] sorted by count
+    desc, or (None, None) when no snapshot body exists yet (the rail then degrades
+    to hidden). Two cheap reads: history (newest sha) → snapshot body.
+    """
+    history = await layer.list_namespace_history(namespace, limit=1)
+    if not history:
+        return None, None
+    body = await layer.get_namespace_snapshot(namespace, history[0].sha)
+    column = next((f for f in body.fields if f.name == field), None)
+    if column is None:
+        return None, None
+    top = sorted(column.values, key=lambda v: v.n, reverse=True)[:limit]
+    facets = [{"value": v.v, "count": v.n} for v in top]
+    provenance = {
+        "sha": body.sha,
+        "watermark_ms": body.watermark_ms,
+        "row_count": body.row_count,
+    }
+    return facets, provenance

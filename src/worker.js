@@ -21,18 +21,17 @@ const INCLUDE = ["title", "author", "series", "description", "genres", "avg_rati
 // in lockstep with shelf_common/embed.py or the semantic route silently drifts.
 const QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 
+// The single facet field shelf snapshots (mirrors shelf_common/gateway.py:
+// FACET_FIELD and deploy/index.yaml's snapshot.facetFields).
+const FACET_FIELD = "genres";
+const FACET_TTL_MS = 300_000; // corpus facets are query-independent; cache per-isolate
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
-function facets(rows) {
-  const counts = new Map();
-  for (const row of rows) for (const g of row.genres || []) counts.set(g, (counts.get(g) || 0) + 1);
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 14)
-    .map(([genre, count]) => ({ genre, count }));
-}
+// Per-isolate cache for the corpus genre rail read from the facet snapshot.
+let facetCache = { at: 0, facets: null, snapshot: null };
 
 export default {
   async fetch(request, env) {
@@ -41,6 +40,7 @@ export default {
       return json({ namespace: env.LAYER_NAMESPACE, field: "text", gateway: env.LAYER_GATEWAY_URL });
     }
     if (pathname === "/api/examples") return json(queriesData);
+    if (pathname === "/api/facets") return facets(env);
     if (pathname === "/api/search") {
       if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
       return search(request, env);
@@ -49,15 +49,53 @@ export default {
   },
 };
 
+// Corpus-wide genre rail from the latest facet snapshot — the JS twin of
+// shelf_common/gateway.py:latest_facets(). Two cheap reads (history → body);
+// empty (rail hidden) until a snapshot exists. Mirrors search/app.py:facets().
+async function facets(env) {
+  const now = Date.now();
+  if (facetCache.facets && now - facetCache.at <= FACET_TTL_MS) {
+    return json({ field: FACET_FIELD, facets: facetCache.facets, snapshot: facetCache.snapshot });
+  }
+  let result = null;
+  let snapshot = null;
+  try {
+    const gateway = env.LAYER_GATEWAY_URL.replace(/\/+$/, "");
+    const ns = env.LAYER_NAMESPACE;
+    const headers = {};
+    if (env.LAYER_API_KEY) headers["Authorization"] = `Bearer ${env.LAYER_API_KEY}`;
+    const hist = await fetch(`${gateway}/v2/namespaces/${ns}/history?limit=1`, { headers });
+    const entries = hist.ok ? await hist.json() : [];
+    if (Array.isArray(entries) && entries.length) {
+      const bodyResp = await fetch(`${gateway}/v2/namespaces/${ns}/snapshots/${entries[0].sha}`, { headers });
+      if (bodyResp.ok) {
+        const body = await bodyResp.json();
+        const field = (body.fields || []).find((f) => f.name === FACET_FIELD);
+        if (field) {
+          result = [...field.values]
+            .sort((a, b) => b.n - a.n)
+            .slice(0, 14)
+            .map((v) => ({ value: v.v, count: v.n }));
+          snapshot = { sha: body.sha, watermark_ms: body.watermark_ms, row_count: body.row_count };
+        }
+      }
+    }
+  } catch {
+    /* degrade to empty rail */
+  }
+  if (result) facetCache = { at: now, facets: result, snapshot };
+  return json({ field: FACET_FIELD, facets: result || [], snapshot });
+}
+
 async function search(request, env) {
   let req;
   try {
     req = await request.json();
   } catch {
-    return json({ rows: [], routing: null, hybrid: null, facets: [] });
+    return json({ rows: [], routing: null, hybrid: null });
   }
   const query = (req.query || "").trim();
-  if (!query) return json({ rows: [], routing: null, hybrid: null, facets: [] });
+  if (!query) return json({ rows: [], routing: null, hybrid: null });
   const topK = Math.max(1, Math.min(Number(req.top_k) || 12, 50));
   const genre = (req.genre || "").trim() || null;
 
@@ -103,7 +141,6 @@ async function search(request, env) {
         rows,
         routing: data.routing || null,
         hybrid: data.hybrid || null,
-        facets: facets(rows),
         took_ms: tookMs,
         query,
         genre,

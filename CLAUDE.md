@@ -63,6 +63,17 @@ declarative in-cluster equivalent). Download at run time; never commit the data.
 - **Talking to the gateway**: issue Turbopuffer-compatible queries to the
   deployed gateway; the `Auto` / `HybridText` `rank_by` values are hev layer
   extensions documented in `api/query.mdx`. Namespace: `shelf-books`.
+- **`deploy/`**: the declarative CR bundle (`VectorStore`, `Warehouse`,
+  `Pipeline`, `Index`) — the in-cluster equivalent of what the indexer + schema
+  do imperatively. Illustrative, not applied (shelf doesn't own the shared
+  cluster). `deploy/README.md` holds the imperative↔declarative map.
+- **Facet snapshots**: the genre rail is a materialized facet histogram, *not* a
+  tally of the returned rows. Declared declaratively on `Index.spec.snapshot.
+  facetFields: [genres]` (`deploy/index.yaml`); materialized imperatively against
+  the shared gateway by `materialize_facet_snapshot()` (a `POST /snapshots`,
+  `source=origin`) at the end of the indexer run. Both backends serve the rail
+  from `/api/facets` (`latest_facets()` → history + body); keep that route in
+  lockstep too.
 
 ## The gateway
 
@@ -78,6 +89,10 @@ commit the key.**
   `text` field (`title + authors + description`). Field-aware routing is an
   *observation* documented in the README, not demo code.
 - **No UDF facet beat in v1.** The genre/mood tagging Function is a v1.1 cameo.
+  This is *distinct* from facet **snapshots** over the raw `genres` field, which
+  *are* in v1 (a shipped feature, declared on the `Index` CR) and power the genre
+  rail. The v1.1 cameo is *minting* cleaner facets with a UDF, not histogramming
+  the ones already there.
 - **~10k corpus.** Don't scale to the UCSD subset in v1.
 - **No new gateway features.** If the demo seems to need one, that's a finding
   for `../layer`, not code here.

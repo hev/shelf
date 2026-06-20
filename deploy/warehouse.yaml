@@ -1,0 +1,22 @@
+# Warehouse — the declared upstream data source (identity + reachability).
+#
+# Declarative equivalent of the dataset pin in shelf_common/config.py
+# (dataset_repo / dataset_revision / dataset_split). The Warehouse owns the
+# *where* and *who* (the Hub endpoint, and a token Secret for gated datasets);
+# the *what* — which dataset, split, revision — lives on the Pipeline's
+# sourceRef (deploy/pipeline.yaml), so one credential reaches many datasets.
+#
+# Eitanli/goodreads is public + MIT, so this warehouse is credentialless
+# (tokenSecretRef omitted). RFC 0053 is the why; the README §Dataset frames the
+# imperative HF loader as the thing this CR reads declaratively in a cluster.
+apiVersion: hevlayer.com/v1alpha1
+kind: Warehouse
+metadata:
+  name: goodreads-hub
+  namespace: shelf
+spec:
+  kind: huggingface
+  huggingface:
+    endpoint: https://huggingface.co
+    # tokenSecretRef is optional for public datasets — omitted here.
+  verifyInterval: 1h
