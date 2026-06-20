@@ -107,6 +107,14 @@
   .route-badge.fused{color:var(--fused);border-color:var(--fused)}
   .route-badge.semantic{color:var(--semantic);border-color:var(--semantic)}
 
+  /* ---------- per-row leg attribution (fused only) ---------- */
+  .legs-strip{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .leg{font-family:var(--mono);font-size:.625rem;font-weight:700;letter-spacing:.03em;
+    border-radius:2px;padding:1px 7px;border:1px solid;white-space:nowrap}
+  .leg.kw{color:var(--hybrid);border-color:var(--hybrid)}
+  .leg.sem{color:var(--semantic);border-color:var(--semantic)}
+  .leg.off{color:var(--muted);border-color:var(--rule)}
+
   /* ---------- right rail (inspector + facets) ---------- */
   .rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:5rem}
   .panel{background:var(--paper-warm);border:1px solid var(--rule);border-left:3px solid var(--signal);
@@ -253,6 +261,18 @@
   const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   const commas = n => (n == null ? '' : Number(n).toLocaleString('en-US'));
 
+  // Per-row leg pills: which side (keyword = hybrid_text, semantic = ANN) found
+  // this row, and at what rank. Present only on fused results (see /api/search).
+  function legStrip(legs) {
+    if (!legs) return '';
+    const pill = (cls, label, name, rank) => '<span class="leg ' + cls + (rank == null ? ' off' : '') +
+      '" title="' + name + (rank == null ? ' leg did not return this row' : ' leg ranked it #' + rank) + '">' +
+      label + ' ' + (rank == null ? '·' : '#' + rank) + '</span>';
+    return '<div class="legs-strip">' +
+      pill('kw', 'kw', 'keyword (hybrid_text)', legs.keyword) +
+      pill('sem', 'sem', 'semantic (ANN)', legs.semantic) + '</div>';
+  }
+
   function highlight(text, tokens) {
     const out = esc(text);
     if (!tokens || !tokens.length) return out;
@@ -344,12 +364,13 @@
         '<p class="snip">' + snip + '</p>' +
         '<div class="row"><span class="tags">' + tags + '</span>' +
         '<span class="score">' + stars + ratings + ' · ' + score + '</span></div>' +
+        legStrip(r.legs) +
         '</div>';
     });
     results.innerHTML = html;
     results.dataset.route = routing ? routing.route : '';
     rail.style.display = '';
-    renderPanel(routing, data.hybrid, data.took_ms);
+    renderPanel(routing, data.hybrid, data.took_ms, data.attribution);
     renderFacets();
     cap('search_performed', {
       query: data.query,
@@ -362,7 +383,7 @@
     });
   }
 
-  function renderPanel(routing, h, tookMs) {
+  function renderPanel(routing, h, tookMs, attribution) {
     if (!routing) { panelBody.innerHTML = '<div class="empty">—</div>'; return; }
     const kv = (k, v) => '<div class="kv"><span>' + k + '</span><span>' + esc(String(v)) + '</span></div>';
     let body = '<div class="routeline"><span class="route-badge ' + esc(routing.route) + '">' + esc(routing.route) +
@@ -376,6 +397,12 @@
       body += '<div class="legs">' + h.legs + ' legs upstream: <b>1 BM25</b> + <b>' + fuzzy +
         ' fuzzy</b> (one per token), fused by RRF.</div>';
       body += kv('fuzziness', h.fuzziness) + kv('rank_constant', h.rank_constant) + kv('per_leg_limit', h.per_leg_limit);
+    }
+    if (attribution) {
+      body += '<div class="cap" style="margin-top:14px">per-row legs</div>';
+      body += '<div class="legs">The fused <code>$score</code> is post-RRF only, so to show which side found each row we re-issued the same input forced to <b>hybrid_text</b> and <b>semantic</b> (' +
+        attribution.calls + ' extra calls, depth ' + attribution.depth + ') and matched ids back. ' +
+        '<span style="color:var(--hybrid);font-weight:600">kw</span> ⊕ <span style="color:var(--semantic);font-weight:600">sem</span> ranks compose the order above. Splitting <b>kw</b> into BM25 vs each fuzzy token needs the gateway.</div>';
     }
     if (tookMs != null) body += '<div class="legs" style="margin-top:10px"><span class="lat">⚡ ' + esc(String(tookMs)) +
       ' ms</span> — routed, executed &amp; returned (edge-measured).</div>';

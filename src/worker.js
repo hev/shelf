@@ -87,6 +87,68 @@ async function facets(env) {
   return json({ field: FACET_FIELD, facets: result || [], snapshot });
 }
 
+// One gateway query with transient-error retry; resolves to rows + echo blocks
+// or throws an Error carrying { status, detail }. The JS twin of app.py's
+// _run_query(). Real 4xx fail immediately; 502/503/504 retry.
+async function runQuery(env, rankBy, topK, genre, include) {
+  const url = `${env.LAYER_GATEWAY_URL.replace(/\/+$/, "")}/v2/namespaces/${env.LAYER_NAMESPACE}/query`;
+  const body = JSON.stringify({
+    rank_by: rankBy,
+    top_k: Math.max(1, Math.min(topK, 50)),
+    include_attributes: include,
+    ...(genre ? { filters: ["genres", "Contains", genre] } : {}),
+  });
+  const headers = { "Content-Type": "application/json" };
+  if (env.LAYER_API_KEY) headers["Authorization"] = `Bearer ${env.LAYER_API_KEY}`;
+
+  let lastDetail = "unknown error";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let resp;
+    const t0 = Date.now();
+    try {
+      resp = await fetch(url, { method: "POST", headers, body });
+    } catch (exc) {
+      lastDetail = `gateway unreachable: ${exc}`;
+      if (attempt < 2) await sleep(400 * (attempt + 1));
+      continue;
+    }
+    const tookMs = Date.now() - t0;
+    if (resp.status === 200) {
+      const data = await resp.json();
+      return { rows: data.rows || [], routing: data.routing || null, hybrid: data.hybrid || null, took_ms: tookMs };
+    }
+    if (!TRANSIENT.has(resp.status)) {
+      const detail = await resp.text();
+      throw Object.assign(new Error(detail), { status: resp.status, detail });
+    }
+    lastDetail = await resp.text();
+    if (attempt < 2) await sleep(400 * (attempt + 1));
+  }
+  throw Object.assign(new Error(lastDetail), { status: 502, detail: `gateway error after retries: ${lastDetail}` });
+}
+
+// Tag each fused row with its keyword-side and semantic-side rank. The JS twin
+// of app.py's _attribute_legs(): a fused response carries only the aggregate
+// RRF $score, so we re-issue the SAME input twice with the route forced (the
+// override the docs bless for "A/B comparison of strategies on the same input")
+// and match ids back — observation, not a second fusion. Keyword side = the
+// shipped hybrid_text expansion (BM25 + fuzzy); semantic side = the ANN leg.
+async function attributeLegs(env, query, vector, genre, base) {
+  // Re-run each side at least as deep as the legs the gateway fused, so any row
+  // that contributed is found in at least one side's list.
+  const depth = Math.max(12, (base.hybrid && base.hybrid.per_leg_limit) || 50);
+  const [keyword, semantic] = await Promise.all([
+    runQuery(env, ["text", "Auto", query, { vector, route: "hybrid_text" }], depth, genre, []),
+    runQuery(env, ["text", "Auto", query, { vector, route: "semantic" }], depth, genre, []),
+  ]);
+  const kwRank = new Map(keyword.rows.map((r, i) => [r.id, i + 1]));
+  const semRank = new Map(semantic.rows.map((r, i) => [r.id, i + 1]));
+  for (const r of base.rows) {
+    r.legs = { keyword: kwRank.get(r.id) ?? null, semantic: semRank.get(r.id) ?? null };
+  }
+  return { depth, keyword_total: keyword.rows.length, semantic_total: semantic.rows.length, calls: 2 };
+}
+
 async function search(request, env) {
   let req;
   try {
@@ -108,47 +170,33 @@ async function search(request, env) {
     return new Response(`embedding failed: ${exc}`, { status: 502 });
   }
 
-  const gateway = env.LAYER_GATEWAY_URL.replace(/\/+$/, "");
-  const url = `${gateway}/v2/namespaces/${env.LAYER_NAMESPACE}/query`;
-  const body = JSON.stringify({
-    // The Layer-only Auto rank expression: the gateway picks the route from the
-    // query's token count and, since a vector is supplied, executes it.
-    rank_by: ["text", "Auto", query, { vector }],
-    top_k: topK,
-    include_attributes: INCLUDE,
-    ...(genre ? { filters: ["genres", "Contains", genre] } : {}),
-  });
-  const headers = { "Content-Type": "application/json" };
-  if (env.LAYER_API_KEY) headers["Authorization"] = `Bearer ${env.LAYER_API_KEY}`;
-
-  // Retry transient gateway/edge hiccups (502/503/504). Real 4xx fail immediately.
-  let lastDetail = "unknown error";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let resp;
-    const t0 = Date.now();
-    try {
-      resp = await fetch(url, { method: "POST", headers, body });
-    } catch (exc) {
-      lastDetail = `gateway unreachable: ${exc}`;
-      if (attempt < 2) await sleep(400 * (attempt + 1));
-      continue;
-    }
-    const tookMs = Date.now() - t0;
-    if (resp.status === 200) {
-      const data = await resp.json();
-      const rows = data.rows || [];
-      return json({
-        rows,
-        routing: data.routing || null,
-        hybrid: data.hybrid || null,
-        took_ms: tookMs,
-        query,
-        genre,
-      });
-    }
-    if (!TRANSIENT.has(resp.status)) return new Response(await resp.text(), { status: resp.status });
-    lastDetail = await resp.text();
-    if (attempt < 2) await sleep(400 * (attempt + 1));
+  let base;
+  try {
+    base = await runQuery(env, ["text", "Auto", query, { vector }], topK, genre, INCLUDE);
+  } catch (exc) {
+    return new Response(exc.detail || String(exc), { status: exc.status || 502 });
   }
-  return new Response(`gateway error after retries: ${lastDetail}`, { status: 502 });
+
+  // Only the fused route mixes a keyword side and a semantic side worth
+  // attributing; hybrid_text and semantic are single-sided. Degrade silently
+  // if attribution fails — the fused list itself still stands.
+  const routing = base.routing || {};
+  let attribution = null;
+  if (routing.route === "fused" && routing.executed !== false) {
+    try {
+      attribution = await attributeLegs(env, query, vector, genre, base);
+    } catch {
+      attribution = null;
+    }
+  }
+
+  return json({
+    rows: base.rows,
+    routing: base.routing,
+    hybrid: base.hybrid,
+    took_ms: base.took_ms,
+    attribution,
+    query,
+    genre,
+  });
 }

@@ -139,6 +139,16 @@ That gap is **field-aware routing**: the design question this corpus raises,
 the way SciFact raised the fuzzy-leg ranking question that RFC 0057
 resolved. `shelf` observes it; it does not solve it.
 
+The fused route raises a second one. A `fused` row carries only the aggregate
+RRF `$score`, so nothing in the response says which leg found it: keyword (BM25 +
+fuzzy) or semantic (ANN). `shelf` reconstructs that client-side by re-issuing the
+same input with the route forced to `hybrid_text` and `semantic` and matching ids
+back — the per-row **kw**/**sem** rank pills on any fused result. That is enough
+to spot a keyword-only rider, but the finer grain (BM25 vs each fuzzy token, in
+one round trip, over a shared consistency cut) needs the gateway. Written up to
+revive RFC 0021's per-row `$fused.legs`:
+[docs/fused-leg-attribution.md](docs/fused-leg-attribution.md).
+
 ## Declarative config
 
 hev layer apps get a clean separation: *what the data is* and *how a namespace
