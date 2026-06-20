@@ -6,10 +6,23 @@ from hevlayer import AsyncHevlayer
 
 from .config import Settings
 
-# The one column auto-schema can't infer for us: the FTS + fuzzy text field the
-# Auto router ranks over (RFC 0022 requires both flags). The vector column and
-# the facet attributes (genres, avg_rating, num_ratings) infer from the rows.
-TEXT_SCHEMA: dict[str, Any] = {"type": "string", "full_text_search": True, "fuzzy": True}
+# Explicit schema for the columns tpuf can't (or shouldn't) infer. tpuf infers
+# only string / int / bool from the payload:
+#  - text: the FTS + fuzzy field the Auto router ranks over (RFC 0022).
+#  - avg_rating: float must be declared — inference guesses int from a
+#    whole-number rating (4.0) and then rejects the next 4.27.
+#  - genres / num_ratings: pinned so the facet columns are stable regardless of
+#    which row is seen first.
+# The vector column infers from the rows; distance_metric is set on the write.
+SCHEMA: dict[str, Any] = {
+    "text": {"type": "string", "full_text_search": True, "fuzzy": True},
+    # Display-only and often >4 KiB; non-filterable dodges tpuf's 4096-byte
+    # filter-value limit (it's still stored, returned, and embedded).
+    "description": {"type": "string", "filterable": False},
+    "genres": {"type": "[]string"},
+    "avg_rating": {"type": "float"},
+    "num_ratings": {"type": "int"},
+}
 
 
 def make_client(settings: Settings) -> AsyncHevlayer:
@@ -45,6 +58,6 @@ async def write_books(layer: AsyncHevlayer, namespace: str, rows: list[dict]) ->
         {
             "upsert_rows": rows,
             "distance_metric": "cosine_distance",
-            "schema": {"text": TEXT_SCHEMA},
+            "schema": SCHEMA,
         },
     )
