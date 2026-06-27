@@ -1,0 +1,28 @@
+# One-shot loader: Goodreads -> embed -> upsert into ns/shelf-books, then build the
+# FTS + vector indexes. Uses the ADMIN key (index builds are admin routes; the admin
+# key also authorizes upsert). Re-run after re-deploys with `kubectl replace --force`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shelf-firn-indexer
+  namespace: firn
+  labels: { app: shelf-firn-demo, component: indexer }
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: { app: shelf-firn-demo, component: indexer }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: indexer
+          image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/shelf-firn-demo:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "firn_demo", "--limit", "0", "--batch-size", "256"]
+          env:
+            - { name: FIRN_URL, value: "http://firn.firn.svc.cluster.local:3000" }
+            - { name: FIRN_NAMESPACE, value: "shelf-books" }
+            - { name: FIRN_API_KEY, valueFrom: { secretKeyRef: { name: firn-keys, key: admin-key } } }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 2Gi }

@@ -16,6 +16,7 @@ Run:  uv run python -m uvicorn firn_demo.app:app --reload   (UI + API at http://
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -53,6 +54,14 @@ def _ensure_meta() -> None:
         return
     for record in load_books(settings, limit=None):
         _meta[firn_id(record)] = record
+
+
+@app.on_event("startup")
+def _warm() -> None:
+    # In-cluster (FIRN_WARM_ON_START=1) eagerly load the metadata sidecar so
+    # readiness reflects true readiness; local dev keeps it lazy (fast startup).
+    if os.environ.get("FIRN_WARM_ON_START"):
+        _ensure_meta()
 
 
 def route_for(query: str) -> tuple[str, list[str]]:
@@ -108,6 +117,11 @@ class SearchRequest(BaseModel):
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/api/config")

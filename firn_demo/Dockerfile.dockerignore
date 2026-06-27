@@ -1,0 +1,11 @@
+# Keep the build context lean (paths relative to the shelf repo root).
+.git
+.venv
+node_modules
+.ruff_cache
+.wrangler
+**/__pycache__
+**/*.pyc
+.env
+.env.local
+firn_demo/deploy

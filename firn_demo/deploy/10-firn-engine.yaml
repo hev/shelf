@@ -1,0 +1,66 @@
+# Firn engine (firnflow-api). Stateless behind a Service — S3 CAS makes N replicas
+# safe on one bucket. ClusterIP only (internal); the demo is the public surface.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firn
+  namespace: firn
+  labels: { app: firn, component: engine }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: firn, component: engine }
+  template:
+    metadata:
+      labels: { app: firn, component: engine }
+    spec:
+      serviceAccountName: firn
+      containers:
+        - name: firnflow-api
+          image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/firnflow-api:latest
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - { name: FIRNFLOW_STORAGE_URI, value: "s3://hev-firn-186219257916/shelf" }
+            - { name: FIRNFLOW_S3_REGION, value: "us-east-1" }
+            - { name: FIRNFLOW_BIND, value: "0.0.0.0:3000" }
+            - { name: FIRNFLOW_CACHE_MEMORY_BYTES, value: "268435456" }   # 256 MiB RAM tier
+            - { name: FIRNFLOW_CACHE_NVME_PATH, value: "/var/lib/firnflow/cache" }
+            - { name: FIRNFLOW_CACHE_NVME_BYTES, value: "5368709120" }     # 5 GiB NVMe tier
+            - { name: FIRNFLOW_OBJECT_CACHE_ENABLED, value: "true" }
+            - { name: FIRNFLOW_OBJECT_CACHE_DIR, value: "/var/lib/firnflow/object-cache" }
+            - { name: FIRNFLOW_OBJECT_CACHE_BYTES, value: "5368709120" }   # 5 GiB byte cache
+            - { name: FIRNFLOW_TRUST_PROXY_HEADERS, value: "true" }        # behind the ALB
+            - { name: RUST_LOG, value: "info" }
+            - { name: FIRNFLOW_API_KEY, valueFrom: { secretKeyRef: { name: firn-keys, key: api-key } } }
+            - { name: FIRNFLOW_ADMIN_API_KEY, valueFrom: { secretKeyRef: { name: firn-keys, key: admin-key } } }
+            - { name: FIRNFLOW_METRICS_TOKEN, valueFrom: { secretKeyRef: { name: firn-keys, key: metrics-token } } }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          volumeMounts:
+            - { name: cache, mountPath: /var/lib/firnflow }
+      volumes:
+        - name: cache
+          emptyDir: { sizeLimit: 12Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: firn
+  namespace: firn
+  labels: { app: firn, component: engine }
+spec:
+  type: ClusterIP
+  selector: { app: firn, component: engine }
+  ports:
+    - { name: http, port: 3000, targetPort: http }

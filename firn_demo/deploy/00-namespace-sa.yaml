@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: firn
+---
+# IRSA: this SA assumes the S3 role so the Firn engine reaches the bucket with no
+# static keys. Role created in account 186219257916 (see firn_demo/deploy/README).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firn
+  namespace: firn
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::186219257916:role/layer-prod-firn-sa-role
