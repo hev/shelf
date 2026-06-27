@@ -1,0 +1,11 @@
+{
+  "examples": [
+    { "text": "dune", "note": "1 token → keyword (BM25 over the text field)" },
+    { "text": "vampire romance", "note": "2 tokens → keyword (BM25)" },
+    { "text": "the lord of the rings", "note": "5 tokens → fused (BM25 ⊕ vector, RRF)" },
+    { "text": "frodo and the one ring", "note": "5 tokens → fused: keyword catches 'ring', vector pulls the LOTR volumes up" },
+    { "text": "a quest to destroy a magic ring", "note": "7 tokens → semantic (ANN over the bge-small embedding)" },
+    { "text": "a young wizard discovers a hidden school of magic", "note": "long sentence → semantic; clusters Harry Potter / Name of the Wind" },
+    { "text": "epic space opera with warring noble houses", "note": "→ semantic; Dune-adjacent sci-fi" }
+  ]
+}
