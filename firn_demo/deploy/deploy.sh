@@ -23,10 +23,13 @@ aws ecr get-login-password --profile "$PROFILE" --region "$REGION" \
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "==> build+push firnflow-api (from $FIRNFLOW_DIR)"
-  ( cd "$FIRNFLOW_DIR" && depot build -t "$REGISTRY/firnflow-api:latest" --push . )
+  # --platform pinned: the layer-prod nodes are amd64 (see the demo build below).
+  ( cd "$FIRNFLOW_DIR" && depot build --platform linux/amd64 -t "$REGISTRY/firnflow-api:latest" --push . )
 
   echo "==> build+push shelf-firn-demo (from $SHELF_DIR)"
-  ( cd "$SHELF_DIR" && depot build --project "$DEPOT_PROJECT" \
+  # --platform pinned: the layer-prod nodes are amd64; without it depot defaults
+  # to the build host's arch (arm64 on Apple Silicon) → ImagePullBackOff.
+  ( cd "$SHELF_DIR" && depot build --project "$DEPOT_PROJECT" --platform linux/amd64 \
       -f firn_demo/Dockerfile -t "$REGISTRY/shelf-firn-demo:latest" --push . )
 fi
 

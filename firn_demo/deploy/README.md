@@ -80,9 +80,11 @@ Prereq: v1 deployed and healthy. Then, with cluster apply access:
 ECR=186219257916.dkr.ecr.us-east-1.amazonaws.com
 aws ecr get-login-password --profile mesh-916 --region us-east-1 | docker login --username AWS --password-stdin $ECR
 
-# 1) Build + push both v2 images
-( cd ../firnflow && depot build -t $ECR/firnflow-api:latest --push . )            # engine: []string support
-depot build --project t4vlld595v -f firn_demo/Dockerfile -t $ECR/shelf-firn-demo:latest --push .  # demo: reconciled client
+# 1) Build + push both v2 images. --platform linux/amd64 is REQUIRED: the
+#    layer-prod nodes are amd64 and depot otherwise defaults to the build host's
+#    arch (arm64 on Apple Silicon) → ImagePullBackOff on rollout.
+( cd ../firnflow && depot build --platform linux/amd64 -t $ECR/firnflow-api:latest --push . )            # engine: []string support
+depot build --project t4vlld595v --platform linux/amd64 -f firn_demo/Dockerfile -t $ECR/shelf-firn-demo:latest --push .  # demo: reconciled client
 
 # 2) Roll the new images
 kubectl -n firn rollout restart deploy/firn deploy/shelf-firn-demo
