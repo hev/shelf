@@ -14,6 +14,13 @@ spec:
     metadata:
       labels: { app: shelf-firn-demo }
     spec:
+      nodeSelector:
+        layer.hev.dev/node-role: system
+      tolerations:
+        - key: layer.hev.dev/node-role
+          operator: Equal
+          value: system
+          effect: NoSchedule
       containers:
         - name: web
           image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/shelf-firn-demo:latest

@@ -14,15 +14,22 @@ spec:
       labels: { app: shelf-firn-demo, component: indexer }
     spec:
       restartPolicy: OnFailure
+      nodeSelector:
+        layer.hev.dev/node-role: system
+      tolerations:
+        - key: layer.hev.dev/node-role
+          operator: Equal
+          value: system
+          effect: NoSchedule
       containers:
         - name: indexer
           image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/shelf-firn-demo:latest
           imagePullPolicy: Always
-          command: ["python", "-m", "firn_demo", "--limit", "0", "--batch-size", "256"]
+          command: ["python", "-m", "firn_demo", "--limit", "0", "--batch-size", "64"]
           env:
             - { name: FIRN_URL, value: "http://firn.firn.svc.cluster.local:3000" }
             - { name: FIRN_NAMESPACE, value: "shelf-books" }
             - { name: FIRN_API_KEY, valueFrom: { secretKeyRef: { name: firn-keys, key: admin-key } } }
           resources:
-            requests: { cpu: 500m, memory: 1Gi }
-            limits: { cpu: "2", memory: 2Gi }
+            requests: { cpu: 500m, memory: 6Gi }
+            limits: { cpu: "2", memory: 12Gi }

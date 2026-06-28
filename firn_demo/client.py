@@ -32,11 +32,10 @@ class FirnClient:
         self._http.close()
 
     # ---- write ----
-    def upsert(self, rows: list[dict], schema: dict | None = None) -> dict:
-        body: dict[str, Any] = {"rows": rows}
-        if schema:
-            body["schema"] = schema
-        return self._post(f"/ns/{self.namespace}/upsert", body)
+    def upsert(self, rows: list[dict]) -> dict:
+        """Upsert rows. Each row is {id, vector, text?, attributes?{}} — Firn
+        infers attribute column types from the values (no schema declaration)."""
+        return self._post(f"/ns/{self.namespace}/upsert", {"rows": rows})
 
     def build_vector_index(self) -> dict:
         return self._post(f"/ns/{self.namespace}/index", {})
@@ -67,29 +66,32 @@ class FirnClient:
         self._raise(resp)
         return resp.json()
 
-    def facet(self, column: str, top_n: int = 14) -> list[dict] | None:
-        """Corpus-wide value→count histogram for a column.
+    def facet(self, column: str, top_n: int = 14, filter: str | None = None) -> list[dict] | None:
+        """Corpus value→count histogram for one column (counts over the filtered
+        set, not the returned top-k).
 
-        Forward-compatible: returns None (rail hides) when the running Firn build
-        has no /facet endpoint yet, or the column isn't a known attribute. The
-        rail lights up automatically once the fork's facet work lands.
+        Matches Firn's `POST /ns/{ns}/facet` contract:
+          request:  {"fields": [col], "top": N, "filter"?: "<predicate>"}
+          response: {"facets": [{"field", "buckets": [{"value", "count"}], "truncated"}]}
+
+        Returns a normalised [{value, count}] list, or None (rail hides) if the
+        running Firn build lacks /facet or the column isn't facetable.
         """
+        body: dict[str, Any] = {"fields": [column], "top": top_n}
+        if filter:
+            body["filter"] = filter
         try:
-            resp = self._http.get(
-                f"/ns/{self.namespace}/facet", params={"column": column, "top_n": top_n}
-            )
+            resp = self._http.post(f"/ns/{self.namespace}/facet", json=body)
         except httpx.HTTPError:
             return None
-        if resp.status_code in (400, 404, 501):
+        if resp.status_code in (400, 404, 405, 501):
             return None
         self._raise(resp)
-        body = resp.json()
-        counts = body.get("counts") or body.get("facets") or []
-        # normalise to [{value, count}]
-        return [
-            {"value": c.get("value", c.get("v")), "count": c.get("count", c.get("n"))}
-            for c in counts
-        ]
+        fields = resp.json().get("facets", [])
+        field = next((f for f in fields if f.get("field") == column), None)
+        if field is None:
+            return None
+        return [{"value": b["value"], "count": b["count"]} for b in field.get("buckets", [])]
 
     def read_metrics(self) -> dict[str, float]:
         """Sum the few firnflow_* counters for THIS namespace (cost panel)."""

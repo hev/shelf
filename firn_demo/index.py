@@ -9,7 +9,7 @@ from indexer.dataset import load_books
 
 from firn_demo.client import FirnClient, FirnError
 from firn_demo.config import FirnSettings
-from firn_demo.schema import SCHEMA, firn_id
+from firn_demo.schema import firn_id, firn_row
 
 
 def _chunked(items: Iterable, size: int) -> Iterator[list]:
@@ -41,11 +41,8 @@ def run(*, limit: int | None, batch_size: int, dry_run: bool, sample: int) -> No
     try:
         for batch in _chunked(load_books(settings, limit=limit), batch_size):
             vectors = embedder.embed_passages([record.embed_text for record in batch])
-            rows = []
-            for record, vector in zip(batch, vectors):
-                row = record.to_row(vector)  # {id:'gr-..', vector, text, title, author, ...}
-                row["id"] = firn_id(record)  # Firn requires a u64 id
-                rows.append(row)
+            # {id:u64, vector, text, attributes:{title, author, genres, ...}}
+            rows = [firn_row(record, vector) for record, vector in zip(batch, vectors)]
 
             if dry_run:
                 for row in rows:
@@ -56,7 +53,7 @@ def run(*, limit: int | None, batch_size: int, dry_run: bool, sample: int) -> No
                     print(json.dumps(preview, ensure_ascii=False, indent=2))
                     shown += 1
             else:
-                client.upsert(rows, schema=SCHEMA)
+                client.upsert(rows)
 
             total += len(rows)
             print(f"  {total} books {'embedded' if dry_run else 'upserted'}…")

@@ -15,6 +15,13 @@ spec:
       labels: { app: firn, component: engine }
     spec:
       serviceAccountName: firn
+      nodeSelector:
+        layer.hev.dev/node-role: system
+      tolerations:
+        - key: layer.hev.dev/node-role
+          operator: Equal
+          value: system
+          effect: NoSchedule
       containers:
         - name: firnflow-api
           image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/firnflow-api:latest

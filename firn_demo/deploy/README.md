@@ -67,11 +67,41 @@ kubectl -n firn port-forward svc/firn 3000:3000 &   # /health, /ns/shelf-books
 curl -s https://firn.hevlayer.com/api/config
 ```
 
-## Updating after the firn fork gains metadata columns + facets
+## v2 — genre facets (`[]string`), deploy AFTER v1 is live
+
+v1 (above) runs search + cache with the genre rail hidden. v2 adds Firn's
+`[]string` attribute type so `genres` is stored, faceted (count per genre), and
+filtered (`array_has`). It is a **rolling update on the same manifests** — new
+images + a reindex (v1 stored no genres). No manifest or DNS change.
+
+Prereq: v1 deployed and healthy. Then, with cluster apply access:
 
 ```bash
-( cd ../firnflow && depot build -t 186219257916.dkr.ecr.us-east-1.amazonaws.com/firnflow-api:latest --push . )
-kubectl -n firn rollout restart deploy/firn
-kubectl -n firn delete job shelf-firn-indexer && kubectl apply -f firn_demo/deploy/30-indexer-job.yaml
-# genre rail + filter light up with no demo code change
+ECR=186219257916.dkr.ecr.us-east-1.amazonaws.com
+aws ecr get-login-password --profile mesh-916 --region us-east-1 | docker login --username AWS --password-stdin $ECR
+
+# 1) Build + push both v2 images
+( cd ../firnflow && depot build -t $ECR/firnflow-api:latest --push . )            # engine: []string support
+depot build --project t4vlld595v -f firn_demo/Dockerfile -t $ECR/shelf-firn-demo:latest --push .  # demo: reconciled client
+
+# 2) Roll the new images
+kubectl -n firn rollout restart deploy/firn deploy/shelf-firn-demo
+kubectl -n firn rollout status  deploy/firn deploy/shelf-firn-demo --timeout=300s
+
+# 3) Reindex so genres land as []string. Delete the namespace first so the
+#    columns are created at table-creation time (avoids schema-evolution on the
+#    list column). The admin key authorizes DELETE; it's derived data, safe to drop.
+ADMIN=$(kubectl -n firn get secret firn-keys -o jsonpath='{.data.admin-key}' | base64 -d)
+kubectl -n firn run firn-reset --rm -i --restart=Never --image=curlimages/curl -- \
+  -s -X DELETE -H "Authorization: Bearer $ADMIN" http://firn.firn.svc.cluster.local:3000/ns/shelf-books
+kubectl -n firn delete job shelf-firn-indexer --ignore-not-found
+kubectl apply -f firn_demo/deploy/30-indexer-job.yaml
+kubectl -n firn wait --for=condition=complete job/shelf-firn-indexer --timeout=1800s
+
+# 4) Verify the genre facet end to end
+kubectl -n firn port-forward svc/firn 3000:3000 &
+curl -s -X POST localhost:3000/ns/shelf-books/facet -H 'content-type: application/json' \
+  -d '{"fields":["genres"],"top":8}'    # -> per-genre counts
+# then open https://firn.hevlayer.com — the "Narrow by genre" rail is now populated;
+# clicking a genre sends filter array_has(genres,'<g>').
 ```

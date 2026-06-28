@@ -2,29 +2,12 @@ from __future__ import annotations
 
 from shelf_common.records import BookRecord
 
-# Declared upsert schema, in the shape shelf already sends its gateway backend
-# (shelf_common/gateway.py SCHEMA). Forward-compatible: Firn builds WITHOUT the
-# fork's "arbitrary scalar columns" work (#84 Part 2) silently ignore the extra
-# row keys + this schema and store only id/vector/text; once Part 2 lands, the
-# same payload persists these as filterable/returnable attributes and the demo's
-# rich cards + genre filter start reading them straight from Firn.
-SCHEMA: dict[str, dict] = {
-    "text": {"type": "string", "full_text_search": True, "fuzzy": True},
-    "title": {"type": "string"},
-    "author": {"type": "string"},
-    "description": {"type": "string", "filterable": False},
-    "series": {"type": "string"},
-    "genres": {"type": "[]string"},
-    "url": {"type": "string"},
-    "avg_rating": {"type": "float"},
-    "num_ratings": {"type": "int"},
-}
-
-# Attribute columns we want back on query results (when the engine supports them).
-ATTRIBUTE_FIELDS = [
-    "title", "author", "description", "series", "genres", "url",
-    "avg_rating", "num_ratings",
-]
+# Book fields carried as Firn attributes (everything the UI cards show, beyond
+# id/vector/text). `genres` is a list → stored as Firn's []string attribute,
+# which powers the genre facet rail (count per genre) and the genre filter
+# (array_has(genres, '<g>')). The rest are scalars (string/float/int).
+# Firn infers each column's type from the values — no schema is declared.
+_SCALAR_FIELDS = ["title", "author", "description", "series", "url", "avg_rating", "num_ratings"]
 
 
 def firn_id(record: BookRecord) -> int:
@@ -38,3 +21,19 @@ def firn_id(record: BookRecord) -> int:
     if raw.isdigit():
         return int(raw)
     return abs(hash(record.id)) % (2**63)
+
+
+def firn_row(record: BookRecord, vector: list[float]) -> dict:
+    """Shape a BookRecord into a Firn upsert row: id/vector/text at top level,
+    everything else nested under `attributes` (the shape Firn's upsert expects)."""
+    flat = record.to_row(vector)  # {id:'gr-..', vector, text, title, author, genres, ...}
+    attributes: dict = {"genres": record.genres}  # []string → facet + array_has filter
+    for field in _SCALAR_FIELDS:
+        if field in flat and flat[field] is not None:
+            attributes[field] = flat[field]
+    return {
+        "id": firn_id(record),
+        "vector": vector,
+        "text": flat["text"],
+        "attributes": attributes,
+    }
