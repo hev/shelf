@@ -93,7 +93,7 @@ async def materialize_facet_snapshot(
     body to S3, which the search backends then read for the genre rail. Used by
     the indexer because shelf doesn't own the Index CR on the shared gateway.
     """
-    job = await layer.create_snapshot(namespace, {"field": field, "source": "origin"})
+    job = await layer.create_snapshot(namespace, {"field": field, "source": "origin", "page_size": 500})
     start = time.monotonic()
     while job.status == "running":
         if time.monotonic() - start > timeout:
