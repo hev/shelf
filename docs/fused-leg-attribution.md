@@ -87,6 +87,8 @@ The cost is asymmetric, and one path is nearly free:
   `rerank_by: ["RRF", ...]`, which returns only fused scores. Per-leg ranks
   require either upstream surfacing them, or the gateway running the legs itself
   when the flag is set (the same legs it already builds, fused locally).
+  Historical note: `shelf` is now backed by hev search behind Layer; this finding
+  records the Turbopuffer-era behavior that motivated `$fused.legs`.
 
 ## Non-goals
 

@@ -96,9 +96,9 @@ declarative in-cluster equivalent). Download at run time; never commit the data.
   the `"Represent this sentence for searching relevant passages: "` prefix
   (prod). bge is asymmetric and the index/query models must match — a mismatch
   silently wrecks the semantic route.
-- **Talking to the gateway**: issue Turbopuffer-compatible queries to the
-  deployed gateway; the `Auto` / `HybridText` `rank_by` values are hev layer
-  extensions documented in `api/query.mdx`. Namespace: `shelf-books`.
+- **Talking to the gateway**: issue Layer queries to the deployed gateway; the
+  `Auto` / `HybridText` `rank_by` values are hev layer extensions documented in
+  `api/query.mdx`. Namespace: `shelf-books`; the backing store is hev search.
 - **`deploy/`**: the declarative CR bundle (`VectorStore`, `Warehouse`,
   `Pipeline`, `Index`) — the in-cluster equivalent of what the indexer + schema
   do imperatively. Illustrative, not applied (shelf doesn't own the shared
@@ -113,11 +113,11 @@ declarative in-cluster equivalent). Download at run time; never commit the data.
 
 ## The gateway
 
-Point at the deployed gateway `https://aws-us-east-1.hevlayer.com`. It uses
-`deriveFromStore` auth, so the inbound bearer token **is** the upstream
-Turbopuffer API key (1Password: `layer-turbopuffer`, field `credential`, vault
-`mesh-staging`). Load it from the environment (`.env`, gitignored). **Never
-commit the key.**
+Point at the deployed gateway `https://aws-us-east-1.hevlayer.com`. Search-backed
+stores use `inboundAuth.mode: keys`, so the bearer token is a Layer-issued
+inbound key scoped to `shelf-books`; the hev search data/admin tokens stay
+upstream-only. Load it from the environment (`.env`, gitignored). **Never commit
+the key.**
 
 ## v1 boundaries (hold the line)
 

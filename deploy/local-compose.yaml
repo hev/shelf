@@ -1,0 +1,77 @@
+# Local-only control-plane objects for docker-compose.yml.
+#
+# Apply these to a disposable local Kubernetes context that already has the
+# Layer CRDs installed. The Layer gateway container reads these CRs through the
+# mounted kubeconfig, while the endpoint points back to the compose network.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shelf
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shelf-hevsearch
+  namespace: shelf
+type: Opaque
+stringData:
+  data-api-key: local-search-data-key
+  admin-api-key: local-search-admin-key
+  metrics-token: local-search-metrics-token
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shelf-layer-inbound
+  namespace: shelf
+type: Opaque
+stringData:
+  api-key: local-layer-inbound-key
+---
+apiVersion: hevlayer.com/v1alpha1
+kind: VectorStore
+metadata:
+  name: search-default
+  namespace: shelf
+spec:
+  kind: search
+  default: true
+  endpoint:
+    url: http://hevsearch:3000
+    region: local
+  search:
+    adminCredential:
+      secretRef:
+        name: shelf-hevsearch
+        key: admin-api-key
+  credential:
+    secretRef:
+      name: shelf-hevsearch
+      key: data-api-key
+  inboundAuth:
+    mode: keys
+    keys:
+      - name: shelf-books
+        scopes: [read, write]
+        secretRef:
+          name: shelf-layer-inbound
+          key: api-key
+---
+apiVersion: hevlayer.com/v1
+kind: Index
+metadata:
+  name: shelf-books
+  namespace: shelf
+spec:
+  backend:
+    storeRef: search-default
+    namespace: shelf-books
+    distanceMetric: cosine_distance
+  snapshot:
+    facetFields:
+      - genres
+    interval: 5m
+    retention: never
+  scan:
+    threads: 8
+  consistency: strong

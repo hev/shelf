@@ -12,7 +12,8 @@
   // Workers AI binding — embeds the query with the same bge-small model the
   // indexer uses, so the semantic route's vectors are compatible.
   "ai": { "binding": "AI" },
-  // Non-secret config. LAYER_API_KEY is a secret: `wrangler secret put LAYER_API_KEY`.
+  // Non-secret config. LAYER_API_KEY is a Layer inbound-key secret:
+  // `wrangler secret put LAYER_API_KEY`.
   "vars": {
     "LAYER_GATEWAY_URL": "https://aws-us-east-1.hevlayer.com",
     "LAYER_NAMESPACE": "shelf-books"

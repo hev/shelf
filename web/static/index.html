@@ -400,7 +400,7 @@
     if (h) {
       const semantic = routing.route === 'fused' ? 1 : 0;
       const fuzzyLegs = Math.max(0, (h.tokens || []).length);
-      body += '<div class="cap" style="margin-top:14px">tokens · <a href="https://github.com/turbopuffer/alyze" target="_blank" rel="noopener">alyze tokenizer</a></div>';
+      body += '<div class="cap" style="margin-top:14px">tokens · alyze tokenizer</div>';
       body += '<div>' + (h.tokens || []).map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
       body += '<div class="legs">' + h.legs + ' effective legs: <b>1 BM25</b> + <b>' + fuzzyLegs +
         ' fuzzy</b> (one per token)' + (semantic ? ' + <b>1 semantic</b>' : '') + ', fused by RRF.</div>';

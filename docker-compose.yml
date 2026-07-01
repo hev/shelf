@@ -1,0 +1,37 @@
+services:
+  hevsearch:
+    image: hevsearch-api:latest
+    build:
+      context: ../search
+    environment:
+      HEVSEARCH_STORAGE_URI: file:///data/hevsearch
+      HEVSEARCH_BIND: 0.0.0.0:3000
+      HEVSEARCH_API_KEY: local-search-data-key
+      HEVSEARCH_ADMIN_API_KEY: local-search-admin-key
+      HEVSEARCH_METRICS_TOKEN: local-search-metrics-token
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+    volumes:
+      - hevsearch-data:/data/hevsearch
+
+  layer:
+    image: layer-gateway:latest
+    build:
+      context: ../layer
+      dockerfile: apps/layer-gateway/Dockerfile
+    depends_on:
+      - hevsearch
+    environment:
+      LAYER_VECTORSTORE_NAMESPACE: shelf
+      LAYER_INDEX_NAMESPACE: shelf
+      LAYER_KEYS_NAMESPACE: shelf
+      LAYER_FACET_FIELDS: '{"shelf-books":["genres"]}'
+      KUBECONFIG: /root/.kube/config
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${HOME}/.kube:/root/.kube:ro
+
+volumes:
+  hevsearch-data:

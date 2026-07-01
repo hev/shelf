@@ -30,7 +30,7 @@ metadata:
   namespace: shelf
 spec:
   backend:
-    storeRef: turbopuffer-default
+    storeRef: search-default
     namespace: shelf-books
     distanceMetric: cosine_distance
   metadata:
@@ -39,6 +39,14 @@ spec:
     tags:
       - books
       - routing-demo
+  # Search-backed shelves need explicit engine index lifecycle. The operator
+  # translates these policies into hev search /fts-index and /index admin ops.
+  embedding:
+    model: shelf-inline
+    outputDim: 384
+    normalization: l2
+  search:
+    fullText: true
   # --- The answer: declare the facet snapshots here. ---
   snapshot:
     facetFields:
