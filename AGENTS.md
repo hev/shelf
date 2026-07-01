@@ -44,13 +44,14 @@ or RFC) so the design-preview signal reaches the Layer team.
 
 ```bash
 uv sync --extra search
-cp .env.example .env                     # LAYER_GATEWAY_API_KEY = upstream Turbopuffer key
+cp .env.example .env                     # LAYER_GATEWAY_API_KEY = Layer inbound key
 uv run python -m indexer                 # populate shelf-books (~10k); --dry-run to preview
 uv run uvicorn search.app:app --reload   # UI + API at http://127.0.0.1:8000
 ```
 
-Gateway: `https://aws-us-east-1.hevlayer.com` (`deriveFromStore`; key from `.env`,
-never committed). Namespace: `shelf-books`. Production is a Cloudflare Worker
+Gateway: `https://aws-us-east-1.hevlayer.com` (`keys` inbound auth; key from `.env`,
+never committed). Namespace: `shelf-books`, backed by hev search through Layer.
+Production is a Cloudflare Worker
 (`src/worker.js`): `npm install`, `wrangler secret put LAYER_API_KEY`,
 `npm run deploy`. Keep the FastAPI and Worker backends in lockstep (CLAUDE.md).
 

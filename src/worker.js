@@ -72,10 +72,31 @@ async function facets(env) {
         const body = await bodyResp.json();
         const field = (body.fields || []).find((f) => f.name === FACET_FIELD);
         if (field) {
-          result = [...field.values]
-            .sort((a, b) => b.n - a.n)
+          const counts = new Map();
+          for (const bucket of field.values || []) {
+            const raw = bucket.v;
+            let values = [];
+            if (typeof raw === "string") {
+              try {
+                const decoded = JSON.parse(raw);
+                values = Array.isArray(decoded) ? decoded : [raw];
+              } catch {
+                values = [raw];
+              }
+            } else if (Array.isArray(raw)) {
+              values = raw;
+            } else if (raw != null) {
+              values = [String(raw)];
+            }
+            for (const value of values) {
+              if (!value) continue;
+              counts.set(value, (counts.get(value) || 0) + (bucket.n || 0));
+            }
+          }
+          result = [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
             .slice(0, 14)
-            .map((v) => ({ value: v.v, count: v.n }));
+            .map(([value, count]) => ({ value, count }));
           snapshot = { sha: body.sha, watermark_ms: body.watermark_ms, row_count: body.row_count };
         }
       }

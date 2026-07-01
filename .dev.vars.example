@@ -1,4 +1,3 @@
-# Local `wrangler dev` secret — the upstream Turbopuffer key (deriveFromStore
-# auth, so the inbound bearer token IS the Turbopuffer key). Copy to .dev.vars
-# (gitignored). In production: `wrangler secret put LAYER_API_KEY`.
+# Local `wrangler dev` secret — a Layer-issued inbound key scoped to shelf-books.
+# Copy to .dev.vars (gitignored). In production: `wrangler secret put LAYER_API_KEY`.
 LAYER_API_KEY=

@@ -13,14 +13,14 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Gateway. deriveFromStore auth: the key IS the upstream Turbopuffer key.
+    # Gateway. The key is a Layer-issued inbound key scoped to shelf-books.
     gateway_url: str = Field(
         default="https://aws-us-east-1.hevlayer.com",
         validation_alias=AliasChoices("LAYER_GATEWAY_URL", "HEVLAYER_BASE_URL"),
     )
     api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("LAYER_GATEWAY_API_KEY", "LAYER_TURBOPUFFER_KEY"),
+        validation_alias="LAYER_GATEWAY_API_KEY",
     )
     namespace: str = Field(default="shelf-books", validation_alias="SHELF_NAMESPACE")
     embed_model: str = Field(

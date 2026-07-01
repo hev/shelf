@@ -79,7 +79,7 @@ terms via the same loader-not-redistribute pattern.
 
 ## Namespace shape
 
-One Turbopuffer namespace (`shelf-books`) behind the gateway:
+One hev search-backed namespace (`shelf-books`) behind the gateway:
 
 | Attribute | Index | Role |
 |---|---|---|
@@ -104,7 +104,7 @@ Eitanli/goodreads (HF, pinned 622b9c6)
   → search/app.py   FastAPI (dev): embed query → Auto+vector → rows + routing + hybrid
   → src/worker.js   Cloudflare Worker (prod): same, query embedding via Workers AI bge-small
   → web/static/     vanilla single-page UI: search, route badge, Routing inspector, genre rail
-  → deploy/         declarative config: the in-cluster CR bundle the above mirrors
+  → deploy/         declarative config: search VectorStore + in-cluster CR bundle
 ```
 
 The genre rail loads from `/api/facets` (a snapshot read), separate from search.
@@ -189,9 +189,15 @@ authoritative in the gateway docs — see
 
 ```bash
 uv sync --extra search                 # install deps
-cp .env.example .env                   # add LAYER_GATEWAY_API_KEY (the upstream Turbopuffer key)
+cp .env.example .env                   # add LAYER_GATEWAY_API_KEY (Layer inbound key)
 uv run python -m indexer               # populate shelf-books (~10k books); --dry-run to preview
 uv run uvicorn search.app:app --reload # serve UI + API at http://127.0.0.1:8000
+```
+
+After the shared gateway is repointed to `kind: search`, run the cutover gate:
+
+```bash
+uv run python scripts/validate_cutover.py --reindex-limit 500
 ```
 
 Production is a Cloudflare Worker (mirrors the SciFact demo): `npm install`, set

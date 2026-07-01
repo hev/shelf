@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
 from hevlayer import AsyncHevlayer
+from pydantic import ValidationError
 
 from .config import Settings
 
@@ -14,18 +16,16 @@ from .config import Settings
 # facet-shaped, so they are deliberately excluded.
 FACET_FIELD = "genres"
 
-# Explicit schema for the columns tpuf can't (or shouldn't) infer. tpuf infers
-# only string / int / bool from the payload:
+# Explicit schema for the columns Layer should create consistently on the
+# backing search store:
 #  - text: the FTS + fuzzy field the Auto router ranks over (RFC 0022).
-#  - avg_rating: float must be declared — inference guesses int from a
-#    whole-number rating (4.0) and then rejects the next 4.27.
+#  - avg_rating: float must stay a float even when early rows look integral.
 #  - genres / num_ratings: pinned so the facet columns are stable regardless of
 #    which row is seen first.
 # The vector column infers from the rows; distance_metric is set on the write.
 SCHEMA: dict[str, Any] = {
     "text": {"type": "string", "full_text_search": True, "fuzzy": True},
-    # Display-only and often >4 KiB; non-filterable dodges tpuf's 4096-byte
-    # filter-value limit (it's still stored, returned, and embedded).
+    # Display-only; stored and returned, but not filterable.
     "description": {"type": "string", "filterable": False},
     "genres": {"type": "[]string"},
     "avg_rating": {"type": "float"},
@@ -36,8 +36,8 @@ SCHEMA: dict[str, Any] = {
 def make_client(settings: Settings) -> AsyncHevlayer:
     if not settings.api_key:
         raise SystemExit(
-            "No gateway key. Set LAYER_GATEWAY_API_KEY in .env — it's the upstream "
-            "Turbopuffer key (1Password: layer-turbopuffer / mesh-staging). "
+            "No gateway key. Set LAYER_GATEWAY_API_KEY in .env — it is the "
+            "Layer inbound key scoped to shelf-books. "
             "Or run with --dry-run to skip the gateway."
         )
     return AsyncHevlayer(
@@ -61,14 +61,26 @@ async def close_client(layer: AsyncHevlayer) -> None:
 async def write_books(layer: AsyncHevlayer, namespace: str, rows: list[dict]) -> Any:
     """Upsert a batch of book rows. Schema is sent inline (idempotent) so the
     text field is FTS+fuzzy-indexed and the vector column is cosine."""
-    return await layer.write_namespace(
-        namespace,
-        {
-            "upsert_rows": rows,
-            "distance_metric": "cosine_distance",
-            "schema": SCHEMA,
-        },
-    )
+    body = {
+        "upsert_rows": rows,
+        "distance_metric": "cosine_distance",
+        "schema": SCHEMA,
+    }
+    try:
+        return await layer.write_namespace(namespace, body)
+    except ValidationError as exc:
+        missing = {
+            ".".join(str(part) for part in error["loc"])
+            for error in exc.errors()
+            if error.get("type") == "missing"
+        }
+        if missing == {"message", "rows_affected", "billing"}:
+            # kind=search currently returns {"status":"OK"} for writes, while
+            # the generated Python client still expects the Turbopuffer write
+            # shape. The write already succeeded server-side; keep indexing and
+            # track the client mismatch in hev/layer#137.
+            return {"status": "OK", "client_parse_warning": "hev/layer#137"}
+        raise
 
 
 async def materialize_facet_snapshot(
@@ -109,8 +121,27 @@ async def latest_facets(
     column = next((f for f in body.fields if f.name == field), None)
     if column is None:
         return None, None
-    top = sorted(column.values, key=lambda v: v.n, reverse=True)[:limit]
-    facets = [{"value": v.v, "count": v.n} for v in top]
+    counts: dict[str, int] = {}
+    for bucket in column.values:
+        raw = bucket.v
+        if isinstance(raw, str):
+            try:
+                decoded = json.loads(raw)
+            except json.JSONDecodeError:
+                decoded = raw
+            values = decoded if isinstance(decoded, list) else [raw]
+        elif isinstance(raw, list):
+            values = raw
+        else:
+            values = [raw] if raw is not None else []
+        for value in values:
+            if value:
+                genre = str(value)
+                counts[genre] = counts.get(genre, 0) + bucket.n
+    facets = [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
     provenance = {
         "sha": body.sha,
         "watermark_ms": body.watermark_ms,

@@ -1,0 +1,81 @@
+# Illustrative hev search engine that deploy/vectorstore.yaml points at.
+# Not applied by shelf directly; the shared Layer cluster owns production ops.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hevsearch
+  namespace: shelf
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::186219257916:role/layer-prod-hevsearch-sa-role
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hevsearch
+  namespace: shelf
+  labels: { app: hevsearch, component: engine }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: hevsearch, component: engine }
+  template:
+    metadata:
+      labels: { app: hevsearch, component: engine }
+    spec:
+      serviceAccountName: hevsearch
+      nodeSelector:
+        layer.hev.dev/node-role: system
+      tolerations:
+        - key: layer.hev.dev/node-role
+          operator: Equal
+          value: system
+          effect: NoSchedule
+      containers:
+        - name: hevsearch-api
+          image: 186219257916.dkr.ecr.us-east-1.amazonaws.com/hevsearch-api:latest
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - { name: HEVSEARCH_STORAGE_URI, value: "s3://hev-search-186219257916/shelf" }
+            - { name: HEVSEARCH_S3_REGION, value: "us-east-1" }
+            - { name: HEVSEARCH_BIND, value: "0.0.0.0:3000" }
+            - { name: HEVSEARCH_CACHE_MEMORY_BYTES, value: "268435456" }
+            - { name: HEVSEARCH_CACHE_NVME_PATH, value: "/var/lib/hevsearch/cache" }
+            - { name: HEVSEARCH_CACHE_NVME_BYTES, value: "5368709120" }
+            - { name: HEVSEARCH_OBJECT_CACHE_ENABLED, value: "true" }
+            - { name: HEVSEARCH_OBJECT_CACHE_DIR, value: "/var/lib/hevsearch/object-cache" }
+            - { name: HEVSEARCH_OBJECT_CACHE_BYTES, value: "5368709120" }
+            - { name: HEVSEARCH_TRUST_PROXY_HEADERS, value: "true" }
+            - { name: RUST_LOG, value: "info" }
+            - { name: HEVSEARCH_API_KEY, valueFrom: { secretKeyRef: { name: shelf-hevsearch, key: data-api-key } } }
+            - { name: HEVSEARCH_ADMIN_API_KEY, valueFrom: { secretKeyRef: { name: shelf-hevsearch, key: admin-api-key } } }
+            - { name: HEVSEARCH_METRICS_TOKEN, valueFrom: { secretKeyRef: { name: shelf-hevsearch, key: metrics-token } } }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          volumeMounts:
+            - { name: cache, mountPath: /var/lib/hevsearch }
+      volumes:
+        - name: cache
+          emptyDir: { sizeLimit: 12Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hevsearch
+  namespace: shelf
+  labels: { app: hevsearch, component: engine }
+spec:
+  type: ClusterIP
+  selector: { app: hevsearch, component: engine }
+  ports:
+    - { name: http, port: 3000, targetPort: http }
