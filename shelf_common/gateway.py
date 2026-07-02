@@ -105,6 +105,37 @@ async def materialize_facet_snapshot(
     return job
 
 
+async def query_facets(
+    layer: AsyncHevlayer, namespace: str, query: str, *, field: str = FACET_FIELD,
+    text_field: str = "text", limit: int = 14, timeout: float = 15.0,
+) -> tuple[list[dict], dict]:
+    """Per-query facet counts via a values scan (docs: api/scans).
+
+    Scoped by an `fts` selector over the routed text field — the closest scan
+    selector to the router's lexical legs. A `hybrid_text` selector would mirror
+    the fused route exactly, but kind=search rejects it today (hev/layer#141),
+    so fused/semantic queries are approximated by their lexical terms. Unlike
+    the snapshot histogram (hev/layer#108), scan values arrive per-element.
+    """
+    job = await layer.scan(
+        namespace,
+        {"mode": "values", "field": field, "source": "auto",
+         "fts": {"field": text_field, "query": query}},
+        timeout=timeout,
+    )
+    if job.status != "completed":
+        raise RuntimeError(f"values scan {job.id} {job.status}: {job.error or 'no detail'}")
+    results = await layer.get_scan_results(namespace, job.id)
+    facets = [{"value": bucket.v, "count": bucket.n} for bucket in results.values[:limit]]
+    provenance = {
+        "scan_id": job.id,
+        "effective_source": job.effective_source,
+        "documents_scanned": job.documents_scanned,
+        "unique_values": job.unique_values,
+    }
+    return facets, provenance
+
+
 async def latest_facets(
     layer: AsyncHevlayer, namespace: str, *, field: str = FACET_FIELD, limit: int = 14
 ) -> tuple[list[dict] | None, dict | None]:

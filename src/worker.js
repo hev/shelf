@@ -40,7 +40,10 @@ export default {
       return json({ namespace: env.LAYER_NAMESPACE, field: "text", gateway: env.LAYER_GATEWAY_URL });
     }
     if (pathname === "/api/examples") return json(queriesData);
-    if (pathname === "/api/facets") return facets(env);
+    if (pathname === "/api/facets") {
+      const q = (new URL(request.url).searchParams.get("q") || "").trim();
+      return q ? queryFacets(env, q) : facets(env);
+    }
     if (pathname === "/api/search") {
       if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
       return search(request, env);
@@ -106,6 +109,57 @@ async function facets(env) {
   }
   if (result) facetCache = { at: now, facets: result, snapshot };
   return json({ field: FACET_FIELD, facets: result || [], snapshot });
+}
+
+// Per-query genre counts via a values scan — the JS twin of
+// shelf_common/gateway.py:query_facets(). Scoped by an `fts` selector over the
+// routed text field (a `hybrid_text` selector would mirror the fused route
+// exactly, but kind=search rejects it today — hev/layer#141). The genre filter
+// is deliberately NOT applied, so the rail shows where else the query lands.
+// Uncached (each query differs); returns facets: null so the UI falls back to
+// the corpus snapshot on any error.
+async function queryFacets(env, query) {
+  try {
+    const gateway = env.LAYER_GATEWAY_URL.replace(/\/+$/, "");
+    const ns = env.LAYER_NAMESPACE;
+    const headers = { "Content-Type": "application/json" };
+    if (env.LAYER_API_KEY) headers["Authorization"] = `Bearer ${env.LAYER_API_KEY}`;
+    const created = await fetch(`${gateway}/v2/namespaces/${ns}/scans`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        mode: "values",
+        field: FACET_FIELD,
+        source: "auto",
+        fts: { field: "text", query },
+      }),
+    });
+    if (!created.ok) throw new Error(`scan create ${created.status}`);
+    let job = await created.json();
+    let waited = 0;
+    for (let delay = 50; job.status === "running"; delay = Math.min(delay * 2, 2000)) {
+      if (waited > 15_000) throw new Error("scan timed out");
+      await sleep(delay);
+      waited += delay;
+      const poll = await fetch(`${gateway}/v2/namespaces/${ns}/scans/${job.id}`, { headers });
+      if (!poll.ok) throw new Error(`scan poll ${poll.status}`);
+      job = await poll.json();
+    }
+    if (job.status !== "completed") throw new Error(job.error || job.status);
+    const resultsResp = await fetch(`${gateway}/v2/namespaces/${ns}/scans/${job.id}/results`, { headers });
+    if (!resultsResp.ok) throw new Error(`scan results ${resultsResp.status}`);
+    const results = await resultsResp.json();
+    const facets = (results.values || []).slice(0, 14).map((b) => ({ value: b.v, count: b.n }));
+    const scan = {
+      scan_id: job.id,
+      effective_source: job.effective_source,
+      documents_scanned: job.documents_scanned,
+      unique_values: job.unique_values,
+    };
+    return json({ field: FACET_FIELD, facets, scan, query });
+  } catch {
+    return json({ field: FACET_FIELD, facets: null, scan: null, query });
+  }
 }
 
 // One gateway query with transient-error retry; resolves to rows + echo blocks

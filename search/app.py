@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from shelf_common.config import Settings
 from shelf_common.embed import Embedder
-from shelf_common.gateway import FACET_FIELD, latest_facets
+from shelf_common.gateway import FACET_FIELD, latest_facets, query_facets
 
 WEB = Path(__file__).resolve().parent.parent / "web" / "static"
 INCLUDE = ["title", "author", "series", "description", "genres", "avg_rating", "num_ratings", "url"]
@@ -70,9 +70,22 @@ def examples() -> dict:
 
 
 @app.get("/api/facets")
-async def facets() -> dict:
-    """Corpus-wide genre rail, read from the latest facet snapshot. Query-
-    independent, so it's cached; empty (rail hidden) until a snapshot exists."""
+async def facets(q: str | None = None) -> dict:
+    """The genre rail, in two modes.
+
+    With `q`, counts are scoped to that search via a values scan (uncached —
+    each query is different); the genre filter is deliberately NOT applied, so
+    the rail shows where else the query lands. Without `q`, the corpus-wide
+    histogram from the latest facet snapshot, cached; empty (rail hidden) until
+    a snapshot exists. Either mode degrades to the other's absence gracefully.
+    """
+    query = (q or "").strip()
+    if query:
+        try:
+            facets, scan = await query_facets(layer, settings.namespace, query)
+        except Exception:  # noqa: BLE001 — rail falls back to corpus counts on any error
+            return {"field": FACET_FIELD, "facets": None, "scan": None, "query": query}
+        return {"field": FACET_FIELD, "facets": facets, "scan": scan, "query": query}
     now = time.monotonic()
     cached = _facet_cache["facets"]
     if cached and now - _facet_cache["at"] <= FACET_TTL:

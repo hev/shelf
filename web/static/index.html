@@ -251,6 +251,9 @@
   let activeGenre = null;      // current genre filter, or null
   let corpusFacets = [];       // corpus-wide genre rail from the facet snapshot
   let facetSnapshot = null;    // its provenance: { sha, watermark_ms, row_count }
+  let queryFacets = null;      // per-query genre counts from a values scan, or null
+  let facetScan = null;        // its provenance: { scan_id, documents_scanned, ... }
+  let facetSeq = 0;            // drops stale scan responses from superseded searches
 
   const ROUTE_DESC = {
     hybrid_text: 'Short, keyword-shaped input — a <b>BM25</b> leg + one <b>fuzzy</b> leg per token, fused by RRF. No vector used.',
@@ -305,6 +308,19 @@
     if (rail.style.display !== 'none') renderFacets();
   }
 
+  async function loadQueryFacets(query) {
+    // Per-query genre counts from a values scan scoped to the same search
+    // (docs: api/scans). Falls back to the corpus snapshot when the scan
+    // fails or a newer search supersedes this one.
+    const seq = ++facetSeq;
+    let d = null;
+    try { d = await (await fetch('/api/facets?q=' + encodeURIComponent(query))).json(); } catch (e) {}
+    if (seq !== facetSeq) return;
+    queryFacets = d && d.facets && d.facets.length ? d.facets : null;
+    facetScan = queryFacets ? d.scan : null;
+    renderFacets();
+  }
+
   async function loadExamples() {
     let ex = [];
     try { ex = (await (await fetch('/api/examples')).json()).examples || []; } catch (e) {}
@@ -339,6 +355,9 @@
     }
     data.round_trip_ms = Math.round(performance.now() - t0);
     render(data);
+    // Rescope the rail to this query in the background; the corpus counts
+    // stay up until the scan lands.
+    loadQueryFacets(query);
   }
 
   function render(data) {
@@ -419,18 +438,25 @@
   }
 
   function renderFacets() {
-    // Corpus-wide genre histogram from the snapshot; counts are catalog-wide,
-    // not per-result. Hidden when no snapshot has been materialized yet.
-    if (!corpusFacets.length && !activeGenre) { facetPanel.style.display = 'none'; return; }
+    // Per-query genre counts from a values scan when a search has run; the
+    // corpus-wide snapshot histogram otherwise (or as fallback while the scan
+    // is in flight / failed). Hidden when neither exists yet.
+    const facets = queryFacets || corpusFacets;
+    if (!facets.length && !activeGenre) { facetPanel.style.display = 'none'; return; }
     facetPanel.style.display = '';
     let body = '';
-    corpusFacets.forEach(f => {
+    facets.forEach(f => {
       const on = activeGenre === f.value;
       body += '<div class="facet' + (on ? ' active' : '') + '" data-g="' + esc(f.value) + '">' +
         '<span>' + esc(f.value) + '</span><span class="n">' + commas(f.count) + '</span></div>';
     });
     if (activeGenre) body += '<span class="clearf" id="clearf">✕ clear genre filter</span>';
-    if (facetSnapshot) body += '<div class="cap" style="margin-top:12px" ' +
+    if (queryFacets && facetScan) body += '<div class="cap" style="margin-top:12px" ' +
+      'title="per-query genre counts — a hev layer values scan scoped to this search (fts selector)">' +
+      'values scan · this search' +
+      (facetScan.documents_scanned != null ? ' · ' + commas(facetScan.documents_scanned) + ' books' : '') +
+      '</div>';
+    else if (facetSnapshot) body += '<div class="cap" style="margin-top:12px" ' +
       'title="materialized facet histogram — a hev layer snapshot, declared in deploy/index.yaml">' +
       'facet snapshot · ' + esc((facetSnapshot.sha || '').slice(0, 7)) +
       (facetSnapshot.row_count != null ? ' · ' + commas(facetSnapshot.row_count) + ' books' : '') +
