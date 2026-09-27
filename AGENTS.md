@@ -89,9 +89,14 @@ gateway feature, that's a finding for Linear, not code here.
 
 Live at shelf.hevlayer.com. `shelf-books` is on the shared gateway's
 `search-store` VectorStore (`kind: search`, confirmed from the gateway's
-`"store":"search"` error echo). hev search is flagged off on layer-pro main
-and not a focus until 2027, so don't grow shelf's dependence on
-search-specific behavior; moving the namespace to another store is a Layer
-team call. The corpus facet snapshot reports `row_count: 500`, not ~10k; not
-yet explained. hev/layer-pro#134 (the cutover coordination) is still open
-though the cutover is live.
+`"store":"search"` echo). hev search is flagged off on layer-pro main and not a
+focus until 2027, so don't grow shelf's dependence on search-specific
+behavior; moving the namespace to another store is a Layer team call.
+
+The namespace holds **500 rows, not ~10k** (count scan and snapshot
+`row_count` agree), apparently left over from the cutover spike. With no
+Sanderson books indexed, the `Sanderson` and `branden sandersn` chips hit a
+gateway bug where `HybridText` returns 502 on a token with no BM25 match
+(LYR-131). Fused and semantic chips work. A full `uv run python -m indexer`
+would restore the corpus; it hasn't been run. hev/layer-pro#134 (cutover
+coordination) is still open though the cutover is live.

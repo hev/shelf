@@ -148,7 +148,7 @@ async def search(req: SearchRequest) -> dict:
     # Embed up front and hand the vector to Auto in the 4th tuple slot: the
     # gateway still picks the route from token count, but semantic/fused execute
     # in one hop instead of deferring. (hybrid_text ignores the vector — the
-    # wasted embed on keyword queries is what RFC 0044 phase 2 would remove.)
+    # wasted embed on keyword queries is what an inline `Embed` vector would remove.)
     vector = embedder.embed_query(query)
     result = await _run_query(
         ["text", "Auto", query, {"vector": vector}],
