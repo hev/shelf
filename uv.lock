@@ -534,7 +534,7 @@ wheels = [
 [[package]]
 name = "hevlayer"
 version = "0.1.0"
-source = { editable = "../layer/clients/python" }
+source = { editable = "../layer-pro/clients/python" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
@@ -1715,7 +1715,7 @@ requires-dist = [
     { name = "datasets", specifier = ">=3.0" },
     { name = "fastapi", marker = "extra == 'search'", specifier = ">=0.115" },
     { name = "fastembed", specifier = ">=0.4" },
-    { name = "hevlayer", editable = "../layer/clients/python" },
+    { name = "hevlayer", editable = "../layer-pro/clients/python" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'search'", specifier = ">=0.30" },

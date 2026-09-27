@@ -26,7 +26,7 @@ loader is "the thing the declarative `Warehouse` kind reads in a cluster."
 | `gateway.py:make_client()` — base URL + bearer key | [`vectorstore.yaml`](vectorstore.yaml) | hev search backend connection + Layer scoped-key inbound auth |
 | `config.py` — `dataset_repo` / `dataset_revision` | [`warehouse.yaml`](warehouse.yaml) | Upstream source identity (HF Hub) |
 | `python -m indexer` — load → embed → upsert | [`pipeline.yaml`](pipeline.yaml) | Staged ingestion: dataset, split, revision, column mapping |
-| `gateway.py:materialize_genre_snapshot()` — `create_snapshot(field=genres)` | [`index.yaml`](index.yaml) → `spec.snapshot.facetFields` | **Facet snapshots** + cache / scan / consistency policy |
+| `gateway.py:materialize_facet_snapshot()` — `create_snapshot(field=genres)` | [`index.yaml`](index.yaml) → `spec.snapshot.facetFields` | **Facet snapshots** + cache / scan / consistency policy |
 
 The one config that stays imperative on **both** sides is the column schema
 (`text` → FTS+fuzzy, `description` non-filterable, the float/int facet types).
@@ -47,45 +47,30 @@ Against the shared gateway, `indexer/index.py` does the same thing by calling
 `POST /snapshots` (`source: origin`) once after upserting — the imperative twin of
 the auto-writer this CR turns on.
 
-See `docs/api/snapshots`, `docs/kubernetes/index-crd`, and the Warehouse /
-Pipeline CRD pages in [`../layer`](https://github.com/hev/layer) for the
+See the [Snapshot History](https://hevlayer.com/docs/api/snapshots),
+[Index CRD](https://hevlayer.com/docs/kubernetes/index-crd) and
+[Warehouse CRD](https://hevlayer.com/docs/kubernetes/warehouse-crd) docs for the
 authoritative shapes.
 
-Production cutover is a Layer-team coordination item: the shared gateway must
-provision the `kind: search` `VectorStore` and repoint the `shelf-books` `Index`.
-The manifests here document the requested shape; they are not applied from this
-repo. Tracking: hev/layer#134. The RFC status doc bug found during the same
-conversion is hev/layer#135.
+On the shared gateway, `shelf-books` is served by the `search-store`
+`VectorStore` (`kind: search`). These manifests document that shape; they are
+not applied from this repo. The corpus rail is the latest snapshot; with a
+query, the backends rescope it with a `values` scan (`gateway.py:query_facets()`).
 
-Once the shared gateway is provisioned, run
-`uv run python scripts/validate_cutover.py --reindex-limit 500` from the repo
-root. That executable check covers the PLAN.md Phase 0 gates: routing echo,
-`$fused.legs`, `genres Contains`, facet snapshot body, and schema/index behavior
-after writing through Layer.
-
-Current shared-gateway findings from the shelf cutover:
-
-- hev/layer#137 — the Python client rejects the search-backed write response
-  shape, so shelf has a narrow compatibility catch while the gateway/client
-  shapes are normalized.
-- hev/layer#138 — Layer does not build hev search FTS/ANN indexes on write; the
-  validation run required a manual `/fts-index` + `/index` intervention.
-- hev/layer#139 — facet snapshots fail against search because the origin scan
-  asks for `limit=1000`, above search's current max of 500. Until this is fixed,
-  `/api/facets` returns an empty rail even though `genres Contains` filtering
-  works.
-- Auth on the shared gateway still uses the existing default-store-derived
-  bearer while `shelf-books` routes to `search-store`; this is acceptable for
-  the current shared demo cutover.
+`uv run python scripts/validate_cutover.py` probes the live namespace read-only:
+the routing echo for all four canned routes, `$fused.legs`, `genres Contains`,
+and the facet snapshot body. `--reindex-limit N` rewrites N books through Layer
+first.
 
 ## Local compose
 
 [`../docker-compose.yml`](../docker-compose.yml) builds `hevsearch-api` from
-`../search` and the Layer gateway from `../layer`. The gateway resolves
+`../search` and the Layer gateway from `../layer-pro`. The gateway resolves
 `VectorStore` and `Index` CRs from Kubernetes at startup, so compose expects a
 local Kubernetes context with the illustrative `shelf` namespace, Secrets, and
 CRs applied. The compose file mounts `${HOME}/.kube` read-only and points the
-gateway at the `shelf` control-plane namespace.
+gateway at the `shelf` control-plane namespace. hev search is flagged off on
+layer-pro main, and this loop was not re-verified after that (2026-09-27).
 
 For a disposable local context with the Layer CRDs already installed:
 
@@ -100,7 +85,3 @@ uv run python scripts/validate_cutover.py --reindex-limit 500
 `deploy/local-compose.yaml` is intentionally separate from the illustrative
 cluster bundle: its `VectorStore.endpoint.url` is `http://hevsearch:3000`, the
 Docker Compose service name visible from the gateway container.
-
-This extra Kubernetes dependency is tracked as hev/layer#136; the desired local
-developer loop is a gateway mode that can resolve its store/index config without
-a Kubernetes control plane.

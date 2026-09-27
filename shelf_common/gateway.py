@@ -36,7 +36,7 @@ SCHEMA: dict[str, Any] = {
 def make_client(settings: Settings) -> AsyncHevlayer:
     if not settings.api_key:
         raise SystemExit(
-            "No gateway key. Set LAYER_GATEWAY_API_KEY in .env — it is the "
+            "No gateway key. Set LAYER_GATEWAY_API_KEY (op read, see AGENTS.md) — it is the "
             "Layer inbound key scoped to shelf-books. "
             "Or run with --dry-run to skip the gateway."
         )
@@ -78,8 +78,8 @@ async def write_books(layer: AsyncHevlayer, namespace: str, rows: list[dict]) ->
             # kind=search currently returns {"status":"OK"} for writes, while
             # the generated Python client still expects the Turbopuffer write
             # shape. The write already succeeded server-side; keep indexing and
-            # track the client mismatch in hev/layer#137.
-            return {"status": "OK", "client_parse_warning": "hev/layer#137"}
+            # track the client mismatch in hev/layer-pro#137.
+            return {"status": "OK", "client_parse_warning": "hev/layer-pro#137"}
         raise
 
 
@@ -113,9 +113,9 @@ async def query_facets(
 
     Scoped by an `fts` selector over the routed text field — the closest scan
     selector to the router's lexical legs. A `hybrid_text` selector would mirror
-    the fused route exactly, but kind=search rejects it today (hev/layer#141),
+    the fused route exactly, but kind=search rejects it today (hev/layer-pro#141),
     so fused/semantic queries are approximated by their lexical terms. Unlike
-    the snapshot histogram (hev/layer#108), scan values arrive per-element.
+    the snapshot histogram (hev/layer-pro#108), scan values arrive per-element.
     """
     job = await layer.scan(
         namespace,

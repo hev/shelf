@@ -1,6 +1,6 @@
 # Finding: per-leg result attribution on fused queries
 
-**Status: shipped in `../layer` and adopted by `shelf`.** This document is the
+**Status: shipped in Layer and adopted by `shelf`.** This document is the
 finding that drove the gateway work; the live demo now sends
 `include_leg_breakdown: true` and renders the returned `$fused.legs` directly.
 

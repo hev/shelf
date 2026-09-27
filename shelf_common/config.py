@@ -9,9 +9,8 @@ EMBED_DIM = 384
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
+    # Environment only: the key is injected at run time from 1Password.
+    model_config = SettingsConfigDict(extra="ignore")
 
     # Gateway. The key is a Layer-issued inbound key scoped to shelf-books.
     gateway_url: str = Field(

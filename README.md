@@ -14,14 +14,14 @@ legible on a corpus where the three routes have obviously different intents.
 
 ## The hero: one box, three routes
 
-hev layer's `Auto` rank expression ([RFC 0044](https://github.com/hev/layer/blob/main/docs/rfcs/0044-query-router.md))
+hev layer's `Auto` rank expression ([Query routing](https://hevlayer.com/docs/api/query#query-routing))
 picks a retrieval strategy from the *shape* of the query and returns the
 decision alongside the results. `shelf` renders that decision as a badge.
 
 | Query | Tokens | Route | Why |
 |---|---|---|---|
 | `Sanderson` | 1 | **hybrid_text** | Short and keyword-shaped — BM25 + fuzzy over the text field, no vector needed. |
-| `branden sandersn` | 2 | **hybrid_text** | Same route; the fuzzy legs ([RFC 0057](https://github.com/hev/layer/blob/main/docs/rfcs/0057-hybrid-text-fuzzy-surfacing.md)) still find Brandon Sanderson through the typos. |
+| `branden sandersn` | 2 | **hybrid_text** | Same route; the fuzzy legs ([hybrid text fusion](https://hevlayer.com/docs/api/query#hybrid-text-fusion)) still find Brandon Sanderson through the typos. |
 | `the name of the wind` | 4 | **fused** | Mid-length — exact-title BM25 *and* semantic, merged by RRF. |
 | `sprawling epic fantasy with morally grey characters and political intrigue` | 10 | **semantic** | Long and natural-language — ANN over description embeddings. |
 
@@ -34,18 +34,21 @@ on each route so the badge visibly changes.
 `shelf` reimplements nothing. Fusion, routing, and fuzzy matching all live in
 the gateway; the app only composes them:
 
-- **Hybrid text fusion** ([RFC 0022](https://github.com/hev/layer/blob/main/docs/rfcs/archive/0022-hybrid-text-fusion.md)) —
+- **Hybrid text fusion** ([docs](https://hevlayer.com/docs/api/query#hybrid-text-fusion)) —
   the `HybridText` expansion: per-token fuzzy legs + a BM25 leg → RRF.
-- **Query router** (RFC 0044, phase 1) — the `Auto` expression and its
-  routing decision block.
-- **Fuzzy surfacing** (RFC 0057) — typo'd queries still return rows.
-- **Facet snapshots** — the genre rail is a materialized facet histogram with
-  visible provenance (corpus-wide counts, not a tally of the returned rows).
-  Declared on the namespace's `Index` CR; see [Declarative config](#declarative-config).
+- **Query router** ([docs](https://hevlayer.com/docs/api/query#query-routing)) —
+  the `Auto` expression and its routing decision block.
+- **Fuzzy surfacing** — typo'd queries still return rows.
+- **Facet snapshots and scans** — with no query, the genre rail is a
+  materialized facet histogram with visible provenance (corpus-wide counts).
+  Once you search, it is rescoped to that query with a `values`
+  [scan](https://hevlayer.com/docs/api/scans). Either way it counts the
+  namespace, not the returned rows. See [Declarative config](#declarative-config).
 
 Wire shapes are authoritative in the gateway docs, not here: see the
-**Hybrid text fusion** and **Query routing** sections of
-`api/query.mdx` in the [layer](https://github.com/hev/layer) repo.
+[Hybrid text fusion](https://hevlayer.com/docs/api/query#hybrid-text-fusion) and
+[Query routing](https://hevlayer.com/docs/api/query#query-routing) sections of
+the query API reference.
 
 ## Dataset
 
@@ -54,7 +57,7 @@ on the HuggingFace Hub: an MIT-licensed set of ~10k popular Goodreads books
 across genres, at revision `622b9c6`. The indexer loads it from the Hub at that pinned
 revision and upserts through the gateway — the same source hev layer's
 HuggingFace `Warehouse` kind
-([RFC 0053](https://github.com/hev/layer/blob/main/docs/rfcs/0053-huggingface-warehouse-kind.md))
+([Warehouse CRD](https://hevlayer.com/docs/kubernetes/warehouse-crd))
 reads declaratively in a full cluster deployment. The data is downloaded at run
 time, never committed.
 
@@ -79,7 +82,8 @@ terms via the same loader-not-redistribute pattern.
 
 ## Namespace shape
 
-One hev search-backed namespace (`shelf-books`) behind the gateway:
+One namespace (`shelf-books`) behind the gateway, currently served by a hev
+search store (`kind: search`) on the shared deployment:
 
 | Attribute | Index | Role |
 |---|---|---|
@@ -94,7 +98,7 @@ One hev search-backed namespace (`shelf-books`) behind the gateway:
 | `url` | — | result link |
 
 Embedder: `BAAI/bge-small-en-v1.5` (384-d, CPU-friendly). The same model embeds
-the query at search time so semantic/fused routes resolve in one hop (see below).
+the query at search time and sends the vector with the request (see below).
 
 ## Architecture
 
@@ -104,10 +108,12 @@ Eitanli/goodreads (HF, pinned 622b9c6)
   → search/app.py   FastAPI (dev): embed query → Auto+vector → rows + routing + hybrid
   → src/worker.js   Cloudflare Worker (prod): same, query embedding via Workers AI bge-small
   → web/static/     vanilla single-page UI: search, route badge, Routing inspector, genre rail
-  → deploy/         declarative config: search VectorStore + in-cluster CR bundle
+  → deploy/         declarative config: the in-cluster CR bundle (illustrative)
 ```
 
-The genre rail loads from `/api/facets` (a snapshot read), separate from search.
+The genre rail loads from `/api/facets`, separate from search: the latest
+snapshot with no query, a per-query `values` scan (`/api/facets?q=`) once you
+search.
 
 Two backends, one UI — the same split as the SciFact demo (`server.py` +
 `src/worker.js`). The FastAPI service is the local-dev/reference path (fastembed,
@@ -119,14 +125,18 @@ index. Both inject the gateway key server-side and return the gateway's
 
 ### The one-hop embedding note
 
-RFC 0044 phase 1 says the **gateway never embeds**. So for the semantic and
-fused routes the app supplies the query vector itself: `search/` embeds every
-query with bge-small and sends the vector alongside the `Auto` expression, so
-the router resolves in a single round trip on any route. The only cost is a
-wasted embed on short keyword queries that route to `hybrid_text` and never use
-the vector — exactly the inefficiency RFC 0044 **phase 2** (gateway-side query
-embedding, currently unscheduled) would remove. `shelf` lives happily on
-phase 1; phase 2 is a footnote, not a blocker.
+`shelf` supplies the query vector itself: both backends embed every query
+with bge-small and send the vector alongside the `Auto` expression, so the
+router resolves in a single round trip on any route. The cost is a wasted embed
+on short keyword queries that route to `hybrid_text` and never use the vector.
+
+The gateway can now do this itself: `Auto` accepts an inline
+`["Embed", input, {field?, model?}]` as its vector, and Layer resolves it only
+after the policy picks `semantic` or `fused`, so a `hybrid_text` route never
+calls the embedding provider (see
+[Query routing](https://hevlayer.com/docs/api/query#query-routing) and
+[Embed](https://hevlayer.com/docs/api/embed)). `shelf` hasn't moved to it yet;
+the backends still embed client-side.
 
 ### What this demo teaches (forward note, not built)
 
@@ -179,36 +189,37 @@ advance, and the search backends read the latest body to draw the rail —
 corpus-wide counts with the snapshot's `sha` and `row_count` shown as
 provenance. Against the shared gateway the indexer does the same thing by
 calling `create_snapshot(field="genres", source="origin")` once after upserting:
-the imperative twin of the auto-writer the CR turns on. Wire shapes are
-authoritative in the gateway docs — see
-[Snapshot History](https://hevlayer.com/docs/api/snapshots) and the
-[Index CRD](https://hevlayer.com/docs/kubernetes/index-crd) in the
-[layer](https://github.com/hev/layer) repo.
+the imperative twin of the auto-writer the CR turns on. When you search,
+the backends rescope the rail with a `values` scan over the same field, keyed
+by an `fts` selector on the routed `text` field, so the counts follow the
+query. Wire shapes are authoritative in the gateway docs: see
+[Snapshot History](https://hevlayer.com/docs/api/snapshots),
+[Scans](https://hevlayer.com/docs/api/scans) and the
+[Index CRD](https://hevlayer.com/docs/kubernetes/index-crd).
 
 ## Run it
 
-```bash
-uv sync --extra search                 # install deps
-cp .env.example .env                   # add LAYER_GATEWAY_API_KEY (Layer inbound key)
-uv run python -m indexer               # populate shelf-books (~10k books); --dry-run to preview
-uv run uvicorn search.app:app --reload # serve UI + API at http://127.0.0.1:8000
-```
-
-After the shared gateway is repointed to `kind: search`, run the cutover gate:
+You need a Layer gateway key scoped to `shelf-books`, in the environment as
+`LAYER_GATEWAY_API_KEY` (don't write it to a file):
 
 ```bash
-uv run python scripts/validate_cutover.py --reindex-limit 500
+uv sync --extra search                    # install deps
+export LAYER_GATEWAY_API_KEY=...          # Layer inbound key for shelf-books
+uv run python -m indexer                  # populate shelf-books (~10k books); --dry-run to preview
+uv run uvicorn search.app:app --reload    # serve UI + API at http://127.0.0.1:8000
+uv run python scripts/validate_cutover.py # read-only probes: routes, fused legs, genre filter, snapshot
 ```
 
 Production is a Cloudflare Worker (mirrors the SciFact demo): `npm install`, set
-the key with `wrangler secret put LAYER_API_KEY`, then `npm run deploy`.
+the key with `wrangler secret put LAYER_API_KEY` (the Worker's name for the same
+key), then `npm run deploy`.
 
 ## Status
 
 v1 scope: the routing showcase above, on the shipped gateway, ~10k books.
 
-In v1: facet snapshots over the raw `genres` field power the genre rail (see
-[Declarative config](#declarative-config)).
+In v1: facet snapshots and per-query `values` scans over the raw `genres`
+field power the genre rail (see [Declarative config](#declarative-config)).
 
 Deliberately out of v1:
 - **UDF-minted facets.** A genre/mood tagging Function over descriptions

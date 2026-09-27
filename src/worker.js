@@ -114,7 +114,7 @@ async function facets(env) {
 // Per-query genre counts via a values scan — the JS twin of
 // shelf_common/gateway.py:query_facets(). Scoped by an `fts` selector over the
 // routed text field (a `hybrid_text` selector would mirror the fused route
-// exactly, but kind=search rejects it today — hev/layer#141). The genre filter
+// exactly, but kind=search rejects it today — hev/layer-pro#141). The genre filter
 // is deliberately NOT applied, so the rail shows where else the query lands.
 // Uncached (each query differs); returns facets: null so the UI falls back to
 // the corpus snapshot on any error.

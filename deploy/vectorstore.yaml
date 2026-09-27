@@ -4,7 +4,7 @@
 # URL + bearer token the indexer and search backends pass at runtime. In a full
 # cluster the gateway reads this CR instead. For kind=search, inbound auth uses
 # Layer-issued scoped keys so the hev search data/admin tokens stay upstream-only.
-# See docs/kubernetes/vectorstore-crd in ../layer.
+# See docs/kubernetes/vectorstore-crd in ../layer-pro.
 apiVersion: hevlayer.com/v1alpha1
 kind: VectorStore
 metadata:
