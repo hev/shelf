@@ -22,7 +22,7 @@
 # float/int facet types) is NOT here — it is asserted inline and idempotently on
 # every write (shelf_common/gateway.py:SCHEMA). The Index CR owns *operational*
 # policy: snapshots/facets, cache, scan fan-out, consistency. See
-# docs/kubernetes/index-crd in ../layer.
+# docs/kubernetes/index-crd in ../layer-pro.
 apiVersion: hevlayer.com/v1
 kind: Index
 metadata:

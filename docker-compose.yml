@@ -18,7 +18,7 @@ services:
   layer:
     image: layer-gateway:latest
     build:
-      context: ../layer
+      context: ../layer-pro
       dockerfile: apps/layer-gateway/Dockerfile
     depends_on:
       - hevsearch

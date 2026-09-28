@@ -1,63 +1,107 @@
-# shelf — Agent Guide
+# shelf
 
-Engineering and operations guide for `shelf`, the book-search demo that makes hev
-layer's **query router** legible. For the build context and conventions read
-`CLAUDE.md`; for the docs-first user-visible shape read `README.md`.
+A public demo on hev layer: book search over ~10k Goodreads books where the
+visible artifact is the gateway's **routing decision** (keyword, fused or
+semantic), not just the results. It is the text-native routing showcase; the
+router's design of record is `../layer-pro/docs/rfcs/0044-query-router.md`
+(also `archive/0022-hybrid-text-fusion.md`,
+`0057-hybrid-text-fuzzy-surfacing.md`, `0053-huggingface-warehouse-kind.md`). `README.md` is the
+public tour and the user-visible spec.
 
-## ⚠️ IMPORTANT — this repo is a Layer design-preview customer
+**This repo is public.** Never put client names, client systems or anything
+from a client engagement in code, comments, docs or commit messages.
 
-This repo is a **design-preview customer of hev layer**, not part of the Layer
-product. Its job is to *use* Layer the way a real customer would and **report
-back** to the Layer team. That feedback loop is a primary responsibility of this
-repo, not a side task — the demo working is table stakes; the signal we send the
-Layer team is the deliverable.
+## You are a Layer customer
 
-**When you hit friction, do not fix Layer from here — report it:**
+shelf exists to use Layer the way a customer would and to report what it
+hits. The demo working is table stakes; the report is the deliverable.
 
-- **A bug, or docs that are wrong / unclear / missing** → file a **GitHub issue**
-  on the Layer repo (`hev/layer`) with a minimal repro and the exact page or
-  behavior at fault.
-- **A missing feature or capability gap** → open an **RFC** in the Layer repo
-  (`../layer/docs/rfcs/`), in the existing RFC shape, with this workload as the
-  motivating / acceptance case.
+- **Reimplement nothing Layer owns:** routing, fusion/RRF, fuzzy matching,
+  facet snapshots, scans. The app posts `Auto` queries and renders the
+  `routing` / `hybrid` / `$fused.legs` echo. If you're writing fusion math, a
+  tokenizer or routing logic, the boundary is wrong.
+- **Read the docs, don't invent API.** Shapes are in
+  `../layer-pro/site/src/content/docs/api/query.mdx` (the **Hybrid text
+  fusion** and **Query routing** sections), `api/snapshots.mdx`,
+  `api/scans.mdx`, and `../layer-pro/apps/layer-gateway/openapi.yaml`.
+- **Report friction in Linear** (workspace `hevmind`, team `LYR`, via the
+  `linear` CLI, not the Linear MCP): a bug or a wrong or missing doc is an
+  issue on LYR. A missing capability is an RFC: a Linear project with an
+  `RFC: <name>` document, with this workload as the motivating case. Don't
+  write new RFCs into `../layer-pro/docs/rfcs/` and don't number them; the
+  existing numbered RFCs there can still be cited by filename as design of
+  record. Old follow-ups cite `hev/layer-pro#NNN` GitHub issues; new ones go
+  to Linear.
+- **Layer operates itself.** Don't hand-tune scaling or rebuild store indexes
+  by hand. If you must intervene to keep the demo up, the intervention gets an
+  issue too.
 
-**Operations are Layer's job.** This repo has operational access to the shared
-Layer cluster, but the goal is that Layer operates *itself* — autoscaling,
-scale-to-zero, scheduling, binpacking. Let it. Do **not** hand-tune what Layer is
-meant to manage.
+## Run and test
 
-- When Layer falls short — autoscaling lags, a pipeline stalls, scale-to-zero
-  misbehaves — it is OK to **intervene** to keep the demo healthy. But every
-  intervention **must** produce a GitHub issue (bug) or an RFC (missing
-  capability). An undocumented manual fix is a process failure: the intervention
-  is the symptom, the report is the deliverable.
-- **Shared namespace / binpacking.** This repo deploys to a namespace in the
-  shared demo cluster alongside the other demos (shelf, shop, chart,
-  hybrid-text-fusion-demo, label). Scheduling / binpacking contention may bite.
-  Same rule: intervene to stay healthy if you must, but the result is a GH issue
-  or an RFC documenting the shortfall — never a silent workaround.
-
-The deliverable of any friction is always a **paper trail in `hev/layer`** (issue
-or RFC) so the design-preview signal reaches the Layer team.
-
-## Run & gateway
-
-```bash
-uv sync --extra search
-cp .env.example .env                     # LAYER_GATEWAY_API_KEY = Layer inbound key
-uv run python -m indexer                 # populate shelf-books (~10k); --dry-run to preview
-uv run uvicorn search.app:app --reload   # UI + API at http://127.0.0.1:8000
+```sh
+uv sync --extra search                  # hevlayer comes from ../layer-pro/clients/python
+export LAYER_GATEWAY_API_KEY="$(op read op://mesh-staging/layer-turbopuffer/credential)"
+uv run python scripts/validate_cutover.py          # read-only probes: 4 routes, $fused.legs, genre filter, facet snapshot
+uv run uvicorn search.app:app --reload             # UI + API at http://127.0.0.1:8000
+uv run python -m indexer --dry-run --limit 20      # preview records; drop --dry-run to upsert shelf-books
 ```
 
-Gateway: `https://aws-us-east-1.hevlayer.com` (`keys` inbound auth; key from `.env`,
-never committed). Namespace: `shelf-books`, backed by hev search through Layer.
-Production is a Cloudflare Worker
-(`src/worker.js`): `npm install`, `wrangler secret put LAYER_API_KEY`,
-`npm run deploy`. Keep the FastAPI and Worker backends in lockstep (CLAUDE.md).
+There is no unit test suite. `validate_cutover.py` without `--reindex-limit`
+only reads; with it, it rewrites that many books first. `node --check
+src/worker.js` catches Worker syntax errors.
 
-## Agent rules
+The gateway key comes from 1Password at run time (on the factory mini the
+same item lives in the `layer-factory` vault). Never write it to a `.env`
+file or print it. The FastAPI side reads `LAYER_GATEWAY_API_KEY`; the Worker
+reads `LAYER_API_KEY`. Gateway: `https://aws-us-east-1.hevlayer.com`,
+namespace `shelf-books` (override with `LAYER_GATEWAY_URL` /
+`SHELF_NAMESPACE`).
 
-- **Reimplement nothing** the gateway owns (routing, fusion, fuzzy, snapshots).
-  A gap is a finding for `../layer`, not local code (see the contract above).
-- Prefer the deployed gateway / public paths for checks.
-- Don't commit secrets or the dataset; don't revert unrelated user changes.
+Gotchas:
+
+- **bge is asymmetric.** Index with fastembed `embed_passages`; query with
+  `embed_query` (dev) or Workers AI `@cf/baai/bge-small-en-v1.5` plus the
+  `"Represent this sentence for searching relevant passages: "` prefix
+  (prod). A mismatch silently wrecks the semantic route.
+- **Two backends, one UI.** `search/app.py` (dev) and `src/worker.js` (prod)
+  must stay in lockstep: `/api/search`, `/api/facets` (no `q`: corpus
+  snapshot; with `q`: per-query values scan), `/api/examples`.
+- The dataset (`Eitanli/goodreads`, pinned revision `622b9c6`) downloads at
+  run time. Never commit it.
+
+## Deploy
+
+- **Web (prod):** a Cloudflare Worker (`src/worker.js`, `wrangler.jsonc`)
+  serving `web/static/` at `shelf.hevlayer.com`. There is no CI; deploy by
+  hand: `npm install`, `op read op://mesh-staging/layer-turbopuffer/credential
+  | npx wrangler secret put LAYER_API_KEY`, `npm run deploy`.
+- **Cluster:** shelf doesn't own the shared cluster. `deploy/` is the
+  illustrative declarative bundle (VectorStore, Warehouse, Pipeline, Index)
+  mirroring what the indexer does imperatively; see `deploy/README.md`. It is
+  not applied from this repo.
+- **Images**, if you ever build one, go to the mesh-account ECR, never
+  `ghcr.io`.
+
+## Scope
+
+v1 is the single-field router over the composed `text` field (`title +
+author + description`), ~10k books, genre rail from the raw `genres` field.
+Field-aware routing is a documented observation, not demo code. A
+UDF-minted genre/mood facet is a v1.1 cameo. If the demo seems to need a new
+gateway feature, that's a finding for Linear, not code here.
+
+## State (2026-09-27)
+
+Live at shelf.hevlayer.com. `shelf-books` is on the shared gateway's
+`search-store` VectorStore (`kind: search`, confirmed from the gateway's
+`"store":"search"` echo). hev search is flagged off on layer-pro main and not a
+focus until 2027, so don't grow shelf's dependence on search-specific
+behavior; moving the namespace to another store is a Layer team call.
+
+The namespace holds **500 rows, not ~10k** (count scan and snapshot
+`row_count` agree), apparently left over from the cutover spike. With no
+Sanderson books indexed, the `Sanderson` and `branden sandersn` chips hit a
+gateway bug where `HybridText` returns 502 on a token with no BM25 match
+(LYR-131). Fused and semantic chips work. A full `uv run python -m indexer`
+would restore the corpus; it hasn't been run. hev/layer-pro#134 (cutover
+coordination) is still open though the cutover is live.

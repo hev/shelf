@@ -1,3 +1,0 @@
-# Local `wrangler dev` secret — a Layer-issued inbound key scoped to shelf-books.
-# Copy to .dev.vars (gitignored). In production: `wrangler secret put LAYER_API_KEY`.
-LAYER_API_KEY=

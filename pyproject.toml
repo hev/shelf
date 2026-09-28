@@ -24,7 +24,7 @@ search = [
 [tool.uv]
 package = false
 
-# hevlayer is not on PyPI yet (0.1, design-partner phase). Source it editable
-# from the sibling layer checkout; flip to a plain PyPI pin when it publishes.
+# hevlayer 0.6.0 is on PyPI, but shelf tracks the client on layer-pro main:
+# source it editable from the sibling layer-pro checkout.
 [tool.uv.sources]
-hevlayer = { path = "../layer/clients/python", editable = true }
+hevlayer = { path = "../layer-pro/clients/python", editable = true }

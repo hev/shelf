@@ -147,7 +147,7 @@ def main() -> None:
         "--reindex-limit",
         type=int,
         default=None,
-        help="Index this many books through Layer before probing. Use 500 for the PLAN.md spike.",
+        help="Index (rewrite) this many books through Layer before probing. Omit for read-only probes.",
     )
     parser.add_argument("--batch-size", type=int, default=128)
     args = parser.parse_args()

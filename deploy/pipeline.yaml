@@ -3,7 +3,7 @@
 # Declarative equivalent of `uv run python -m indexer` (load → embed → upsert).
 # The Warehouse (deploy/warehouse.yaml) is identity; this sourceRef is the
 # *what*: dataset, split, pinned revision, and the column → attribute mapping.
-# The stock `ghcr.io/hev/huggingface-source` worker streams the dataset's
+# The reserved stock `huggingface-source` worker streams the dataset's
 # Parquet conversion at the pinned revision, so `spec.worker.image` is omitted.
 #
 # TWO HONEST DIVERGENCES from indexer/ — the same "observed, not hidden" posture
