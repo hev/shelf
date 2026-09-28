@@ -3,8 +3,9 @@
 A public demo on hev layer: book search over ~10k Goodreads books where the
 visible artifact is the gateway's **routing decision** (keyword, fused or
 semantic), not just the results. It is the text-native routing showcase; the
-router is RFC 0044 in `../layer-pro/docs/rfcs/` (hybrid fusion 0022 in
-`archive/`, fuzzy legs 0057, HuggingFace `Warehouse` 0053). `README.md` is the
+router's design of record is `../layer-pro/docs/rfcs/0044-query-router.md`
+(also `archive/0022-hybrid-text-fusion.md`,
+`0057-hybrid-text-fuzzy-surfacing.md`, `0053-huggingface-warehouse-kind.md`). `README.md` is the
 public tour and the user-visible spec.
 
 **This repo is public.** Never put client names, client systems or anything
@@ -23,10 +24,14 @@ hits. The demo working is table stakes; the report is the deliverable.
   `../layer-pro/site/src/content/docs/api/query.mdx` (the **Hybrid text
   fusion** and **Query routing** sections), `api/snapshots.mdx`,
   `api/scans.mdx`, and `../layer-pro/apps/layer-gateway/openapi.yaml`.
-- **Report friction in Linear** (team `layer`): a bug or a wrong or missing
-  doc is an issue; a missing capability is an RFC in
-  `../layer-pro/docs/rfcs/` with this workload as the motivating case. Old
-  follow-ups cite `hev/layer-pro#NNN` GitHub issues; new ones go to Linear.
+- **Report friction in Linear** (workspace `hevmind`, team `LYR`, via the
+  `linear` CLI, not the Linear MCP): a bug or a wrong or missing doc is an
+  issue on LYR. A missing capability is an RFC: a Linear project with an
+  `RFC: <name>` document, with this workload as the motivating case. Don't
+  write new RFCs into `../layer-pro/docs/rfcs/` and don't number them; the
+  existing numbered RFCs there can still be cited by filename as design of
+  record. Old follow-ups cite `hev/layer-pro#NNN` GitHub issues; new ones go
+  to Linear.
 - **Layer operates itself.** Don't hand-tune scaling or rebuild store indexes
   by hand. If you must intervene to keep the demo up, the intervention gets an
   issue too.
